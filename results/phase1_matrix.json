@@ -1,0 +1,86 @@
+{
+  "experiment": "phase1_latency_matrix",
+  "rows": [
+    {
+      "buffer_underrun_ratio": 0.0,
+      "buffer_underrun_ticks": 0,
+      "final_tracking_error": 0.0,
+      "latency_s": 0.0,
+      "observation_age_p95_s": 0.18000000000000016,
+      "prefetch_threshold_s": 0.08,
+      "scheduler": "sync",
+      "ticks": 100
+    },
+    {
+      "buffer_underrun_ratio": 0.0,
+      "buffer_underrun_ticks": 0,
+      "final_tracking_error": 1.1274289151153027e-06,
+      "latency_s": 0.0,
+      "observation_age_p95_s": 0.10000000000000009,
+      "prefetch_threshold_s": 0.08,
+      "scheduler": "fixed_async",
+      "ticks": 100
+    },
+    {
+      "buffer_underrun_ratio": 0.3,
+      "buffer_underrun_ticks": 30,
+      "final_tracking_error": 0.0,
+      "latency_s": 0.05,
+      "observation_age_p95_s": 0.18000000000000016,
+      "prefetch_threshold_s": 0.08,
+      "scheduler": "sync",
+      "ticks": 100
+    },
+    {
+      "buffer_underrun_ratio": 0.03,
+      "buffer_underrun_ticks": 3,
+      "final_tracking_error": 1.6106127359583056e-06,
+      "latency_s": 0.05,
+      "observation_age_p95_s": 0.16000000000000014,
+      "prefetch_threshold_s": 0.08,
+      "scheduler": "fixed_async",
+      "ticks": 100
+    },
+    {
+      "buffer_underrun_ratio": 0.8,
+      "buffer_underrun_ticks": 80,
+      "final_tracking_error": 0.19999999999999984,
+      "latency_s": 0.15,
+      "observation_age_p95_s": 0.18000000000000016,
+      "prefetch_threshold_s": 0.08,
+      "scheduler": "sync",
+      "ticks": 100
+    },
+    {
+      "buffer_underrun_ratio": 0.76,
+      "buffer_underrun_ticks": 76,
+      "final_tracking_error": 0.0399999999999997,
+      "latency_s": 0.15,
+      "observation_age_p95_s": 0.18000000000000016,
+      "prefetch_threshold_s": 0.08,
+      "scheduler": "fixed_async",
+      "ticks": 100
+    },
+    {
+      "buffer_underrun_ratio": 1.0,
+      "buffer_underrun_ticks": 100,
+      "final_tracking_error": 1.0,
+      "latency_s": 0.25,
+      "observation_age_p95_s": null,
+      "prefetch_threshold_s": 0.08,
+      "scheduler": "sync",
+      "ticks": 100
+    },
+    {
+      "buffer_underrun_ratio": 1.0,
+      "buffer_underrun_ticks": 100,
+      "final_tracking_error": 1.0,
+      "latency_s": 0.25,
+      "observation_age_p95_s": null,
+      "prefetch_threshold_s": 0.08,
+      "scheduler": "fixed_async",
+      "ticks": 100
+    }
+  ],
+  "scope": "deterministic toy plant; not VLA performance"
+}

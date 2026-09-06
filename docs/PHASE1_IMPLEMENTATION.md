@@ -201,7 +201,7 @@ python -m robovla_runtime.cli run --config configs/phase1_async.toml
 输出：
 
 ```text
-runs/<run-id>/config.toml
+runs/<run-id>/config.json
 runs/<run-id>/events.jsonl
 runs/<run-id>/summary.json
 ```
@@ -244,3 +244,6 @@ runs/<run-id>/summary.json
 
 第一阶段完成的判断标准：运行同一条延迟 trace 时，报告能够解释每个动作来自哪个 observation/chunk、为什么发生 fallback，以及固定预取异步在什么延迟范围内改善连续执行。达到这一点后再实现 FluxVLA adapter 和真实 profiler。
 
+## 12. 实现状态
+
+第一阶段已于 2026-09-05 实现。当前示例在 20 ms 动作周期、10 步执行 horizon 和 50 ms 固定推理延迟下运行 100 ticks：同步策略产生 30 个 fallback ticks，固定预取异步策略产生 3 个。该结果仅用于验证调度与指标链路；随着 toy policy、时间锚定规则或配置变化，数值也会变化。

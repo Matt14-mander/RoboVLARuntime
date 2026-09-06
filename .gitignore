@@ -1,2 +1,7 @@
 .upstream/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+runs/
+.tmp-runs/
 

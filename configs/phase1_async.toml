@@ -1,0 +1,13 @@
+[runtime]
+scheduler = "fixed_async"
+period_s = 0.02
+duration_s = 2.0
+chunk_size = 10
+execute_horizon = 10
+latency_s = [0.05]
+prefetch_threshold_s = 0.08
+initial_position = [0.0]
+target_position = [1.0]
+max_velocity = 2.0
+seed = 7
+
