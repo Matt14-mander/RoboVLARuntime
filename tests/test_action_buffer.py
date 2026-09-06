@@ -26,6 +26,7 @@ def make_chunk(
 
 
 class ActionBufferTests(unittest.TestCase):
+    # Test cases for ActionBuffer, which is a bounded, time-aligned action chunk buffer.
     def test_each_action_is_consumed_at_most_once(self) -> None:
         buffer = ActionBuffer("episode-a")
         self.assertTrue(buffer.accept(make_chunk(), 0.0).accepted)
@@ -34,6 +35,7 @@ class ActionBufferTests(unittest.TestCase):
         self.assertEqual(first.action_index, 0)
         self.assertIsNone(buffer.pop(0.0))
 
+    # Test that the buffer accepts a chunk and drops expired prefix actions.
     def test_accept_reports_expired_prefix(self) -> None:
         buffer = ActionBuffer("episode-a")
         result = buffer.accept(make_chunk(), 0.21)
@@ -41,6 +43,7 @@ class ActionBufferTests(unittest.TestCase):
         self.assertEqual(result.dropped_prefix_actions, 2)
         self.assertEqual(buffer.pop(0.21).action_index, 2)
 
+    # Test that the buffer rejects chunks that are expired, from the wrong episode, or duplicates.
     def test_rejects_expired_wrong_episode_and_duplicate(self) -> None:
         buffer = ActionBuffer("episode-a")
         self.assertEqual(
@@ -51,18 +54,21 @@ class ActionBufferTests(unittest.TestCase):
         self.assertTrue(buffer.accept(make_chunk(3), 0.0).accepted)
         self.assertEqual(buffer.accept(make_chunk(3), 0.0).reason, "duplicate")
 
+    # Test that the buffer uses the exclusive chunk end for coverage calculations.
     def test_coverage_uses_exclusive_chunk_end(self) -> None:
         buffer = ActionBuffer("episode-a")
         buffer.accept(make_chunk(), 0.0)
         self.assertAlmostEqual(buffer.coverage_s(0.15), 0.25)
         self.assertEqual(buffer.coverage_s(0.4), 0.0)
 
+    # Test that the buffer respects the execution horizon when accepting chunks.
     def test_execution_horizon_limits_accepted_chunk(self) -> None:
         buffer = ActionBuffer("episode-a", max_actions_per_chunk=2)
         buffer.accept(make_chunk(count=4), 0.0)
         self.assertAlmostEqual(buffer.coverage_s(0.0), 0.2)
         self.assertIsNone(buffer.pop(0.2))
 
+    # Test that the buffer rejects late chunks from previous episodes.
     def test_reset_rejects_late_chunk_from_previous_episode(self) -> None:
         buffer = ActionBuffer("episode-a")
         old_chunk = make_chunk(request_id=4, episode_id="episode-a")
