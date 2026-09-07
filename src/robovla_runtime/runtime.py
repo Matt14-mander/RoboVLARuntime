@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from robovla_runtime.backends.mock import MockBackend
+from robovla_runtime.backends.base import PolicyBackend
 from robovla_runtime.core.clock import VirtualClock
 from robovla_runtime.core.events import Event, EventLog
 from robovla_runtime.core.types import ActionSpec, ExecutionRecord, Observation
@@ -28,6 +29,7 @@ class RuntimeConfig:
     initial_position: tuple[float, ...] = (0.0,)
     target_position: tuple[float, ...] = (1.0,)
     max_velocity: float = 2.0
+    action_unit: str = "normalized"
     seed: int = 7
 
     def __post_init__(self) -> None:
@@ -43,6 +45,8 @@ class RuntimeConfig:
             raise ValueError("latency trace must be non-empty and non-negative")
         if len(self.initial_position) != len(self.target_position):
             raise ValueError("initial and target positions must have equal dimensions")
+        if not self.action_unit:
+            raise ValueError("action_unit must not be empty")
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +60,12 @@ class SimulationResult:
         return asdict(self.config)
 
 
-def run_simulation(config: RuntimeConfig) -> SimulationResult:
+def run_runtime(
+    config: RuntimeConfig,
+    backend: PolicyBackend,
+    *,
+    observation_payload_factory=None,
+) -> SimulationResult:
     clock = VirtualClock()
     log = EventLog()
     episode_id = f"episode-seed-{config.seed}"
@@ -64,17 +73,13 @@ def run_simulation(config: RuntimeConfig) -> SimulationResult:
         dimension=len(config.initial_position),
         period_s=config.period_s,
         representation="absolute_position",
-        unit="normalized",
+        unit=config.action_unit,
     )
     environment = ToyJoint(
         config.initial_position, config.target_position, config.max_velocity
     )
-    backend = MockBackend(
-        action_spec,
-        config.chunk_size,
-        config.latency_s,
-        config.target_position,
-    )
+    if backend.action_spec != action_spec:
+        raise ValueError("backend ActionSpec does not match runtime configuration")
     action_buffer = ActionBuffer(episode_id, config.execute_horizon)
     executor = Executor(action_spec, environment, log)
     if config.scheduler == "sync":
@@ -88,8 +93,17 @@ def run_simulation(config: RuntimeConfig) -> SimulationResult:
 
     def capture(timestamp: float) -> Observation:
         nonlocal observation_id
+        payload = (
+            observation_payload_factory(environment)
+            if observation_payload_factory is not None
+            else None
+        )
         observation = Observation(
-            episode_id, observation_id, timestamp, environment.state
+            episode_id,
+            observation_id,
+            timestamp,
+            environment.state,
+            payload,
         )
         observation_id += 1
         return observation
@@ -120,6 +134,23 @@ def run_simulation(config: RuntimeConfig) -> SimulationResult:
         log.events,
         summary,
     )
+
+
+def run_simulation(config: RuntimeConfig) -> SimulationResult:
+    """Run the built-in deterministic mock experiment."""
+    action_spec = ActionSpec(
+        dimension=len(config.initial_position),
+        period_s=config.period_s,
+        representation="absolute_position",
+        unit=config.action_unit,
+    )
+    backend = MockBackend(
+        action_spec,
+        config.chunk_size,
+        config.latency_s,
+        config.target_position,
+    )
+    return run_runtime(config, backend)
 
 
 def math_ceil_ratio(numerator: float, denominator: float) -> int:

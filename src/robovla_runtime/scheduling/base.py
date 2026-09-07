@@ -28,6 +28,7 @@ class BaseScheduler:
             requested_at=pending.requested_at,
             ready_at=pending.ready_at,
             latency_s=pending.ready_at - pending.requested_at,
+            timings_s=dict(pending.timings_s),
         )
         result = action_buffer.accept(pending.chunk, now)
         self.event_log.emit(
@@ -68,4 +69,3 @@ class BaseScheduler:
         capture_observation: Callable[[float], Observation],
     ) -> None:
         raise NotImplementedError
-

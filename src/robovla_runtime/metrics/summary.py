@@ -34,6 +34,12 @@ def summarize(
         for event in events
         if event.type == "prediction_ready"
     ]
+    stage_latencies: dict[str, list[float]] = {}
+    for event in events:
+        if event.type != "prediction_ready":
+            continue
+        for stage, value in event.data.get("timings_s", {}).items():
+            stage_latencies.setdefault(stage, []).append(float(value))
     ages = [
         age
         for record in records
@@ -60,6 +66,15 @@ def summarize(
             "p95": _quantile(latencies, 0.95),
             "max": max(latencies) if latencies else None,
         },
+        "prediction_stage_latency_s": {
+            stage: {
+                "samples": len(values),
+                "p50": _quantile(values, 0.50),
+                "p95": _quantile(values, 0.95),
+                "max": max(values),
+            }
+            for stage, values in sorted(stage_latencies.items())
+        },
         "observation_age_s": {
             "samples": len(ages),
             "p50": _quantile(ages, 0.50),
@@ -74,4 +89,3 @@ def summarize(
         "max_command_jump": max(jumps) if jumps else 0.0,
         "final_tracking_error": final_tracking_error,
     }
-

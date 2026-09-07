@@ -12,6 +12,7 @@ class Observation:
     observation_id: int
     captured_at: float
     state: tuple[float, ...]
+    payload: object | None = None
 
     def __post_init__(self) -> None:
         if not self.episode_id:
@@ -93,4 +94,3 @@ class ExecutionRecord:
         if self.source_observation_time is None:
             return None
         return self.executed_at - self.source_observation_time
-

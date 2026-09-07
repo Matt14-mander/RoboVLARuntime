@@ -4,7 +4,8 @@ A resource-aware runtime and evaluation framework for real-time Vision-Language-
 Status: phase-one deterministic runtime core is implemented. It provides a
 virtual clock, mock chunked policy, time-aligned action buffer, synchronous and
 fixed-prefetch schedulers, a toy joint plant, structured event traces, and
-summary metrics. FluxVLA and real-robot adapters are planned for phase two.
+summary metrics. A dependency-injected `FluxVLABackend` is now available for
+phase-two integration; real checkpoint and LIBERO validation remain pending.
 
 ## Quick start
 
@@ -40,3 +41,4 @@ they are not VLA task-success or real-robot performance claims.
 - [第一份源码分析笔记：FluxVLA SmolVLA LIBERO 调用链](notes/01_fluxvla_inference_path.md)
 - [第一阶段开发规格：确定性 Runtime Core](docs/PHASE1_IMPLEMENTATION.md)
 - [第一阶段基线结果](results/phase1_matrix.md)
+- [第二阶段 FluxVLABackend 接入说明](docs/PHASE2_FLUXVLA_BACKEND.md)
