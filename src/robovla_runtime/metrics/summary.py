@@ -45,12 +45,19 @@ def summarize(
         for record in records
         if (age := record.observation_age_s) is not None
     ]
+    tick_lateness = [
+        max(0.0, record.executed_at - record.scheduled_at) for record in records
+    ]
     fallback_count = sum(record.fallback_reason is not None for record in records)
     deadline_misses = sum(
         event.type in {"action_executed", "fallback_executed"}
         and bool(event.data["deadline_missed"])
         for event in events
     )
+    mailbox_replacements = sum(
+        event.type == "mailbox_request_replaced" for event in events
+    )
+    prediction_failures = sum(event.type == "prediction_failed" for event in events)
     jumps = [
         math.sqrt(
             sum((right - left) ** 2 for left, right in zip(a.command, b.command))
@@ -60,6 +67,8 @@ def summarize(
     return {
         "ticks": len(records),
         "prediction_count": len(latencies),
+        "prediction_failure_count": prediction_failures,
+        "mailbox_replacement_count": mailbox_replacements,
         "prediction_latency_s": {
             "samples": len(latencies),
             "p50": _quantile(latencies, 0.50),
@@ -80,6 +89,12 @@ def summarize(
             "p50": _quantile(ages, 0.50),
             "p95": _quantile(ages, 0.95),
             "max": max(ages) if ages else None,
+        },
+        "control_tick_lateness_s": {
+            "samples": len(tick_lateness),
+            "p50": _quantile(tick_lateness, 0.50),
+            "p95": _quantile(tick_lateness, 0.95),
+            "max": max(tick_lateness) if tick_lateness else None,
         },
         "buffer_underrun_ticks": fallback_count,
         "buffer_underrun_ratio": fallback_count / len(records) if records else 0.0,

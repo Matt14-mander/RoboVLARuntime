@@ -4,8 +4,9 @@ A resource-aware runtime and evaluation framework for real-time Vision-Language-
 Status: phase-one deterministic runtime core is implemented. It provides a
 virtual clock, mock chunked policy, time-aligned action buffer, synchronous and
 fixed-prefetch schedulers, a toy joint plant, structured event traces, and
-summary metrics. A dependency-injected `FluxVLABackend` is now available for
-phase-two integration; real checkpoint and LIBERO validation remain pending.
+summary metrics. Phase two adds a dependency-injected `FluxVLABackend` and a
+worker-backed real-time loop so GPU inference can overlap control execution;
+real checkpoint and LIBERO validation remain pending.
 
 ## Quick start
 

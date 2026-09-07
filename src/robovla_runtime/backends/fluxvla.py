@@ -163,7 +163,7 @@ class FluxVLABackend:
 
     ``request`` is a blocking model call. Its measured latency is projected
     onto the runtime clock through ``ready_at`` for deterministic analysis.
-    A worker-backed non-blocking implementation is a separate next step.
+    Wrap this backend in ``ThreadedPolicyBackend`` for non-blocking execution.
     """
 
     def __init__(

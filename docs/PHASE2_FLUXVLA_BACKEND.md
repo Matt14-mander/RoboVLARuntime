@@ -105,8 +105,67 @@ start_at = source observation captured_at
 
 因此现有 `ActionBuffer` 会按动作周期丢弃返回时已经过期的前缀，并保留 request、observation 与 action index 的关联。
 
+## Worker 异步执行
+
+`FluxVLABackend.request()` 仍然保持一个易测试的阻塞推理调用。真实运行时通过
+`ThreadedPolicyBackend` 把它放入专用 worker，控制线程只调用非阻塞的
+`submit()` 和 `poll()`：
+
+```python
+from robovla_runtime import RuntimeConfig, run_realtime_runtime
+from robovla_runtime.backends import ThreadedPolicyBackend
+
+blocking_backend = FluxVLABackend.from_libero_runner(
+    runner=libero_runner,
+    action_spec=spec,
+    task_description=task_description,
+    synchronize=torch.cuda.synchronize,
+)
+backend = ThreadedPolicyBackend(blocking_backend)
+
+config = RuntimeConfig(
+    scheduler="worker_async",
+    period_s=0.1,
+    duration_s=30.0,
+    chunk_size=10,
+    execute_horizon=10,
+    prefetch_threshold_s=0.3,
+    initial_position=(0.0,) * 7,
+    target_position=(0.0,) * 7,
+    action_unit="libero_action",
+    deadline_tolerance_s=0.005,
+)
+
+result = run_realtime_runtime(
+    config,
+    backend,
+    observation_payload_factory=lambda environment: read_libero_observation(),
+)
+```
+
+这里的 `run_realtime_runtime` 仍使用项目自带的 `ToyJoint`，用于验证墙钟调度、
+buffer 和并发行为；`read_libero_observation()` 是需要由调用方提供的采集函数。
+它不能代替 `LiberoEvalRunner` 的 `env.step()`，也不能把 LIBERO 的末端增量动作
+解释成 toy joint 的绝对位置。接入真实 LIBERO/机器人闭环前还需要单独的环境执行
+适配器和匹配的 ActionSpec。
+
+worker 同时最多持有一个正在执行的请求和一个等待请求。控制循环提交更近的
+observation 时，会原子替换等待请求，避免按 FIFO 累积陈旧 observation。
+`mailbox_request_replaced` 事件和 `mailbox_replacement_count` 指标记录替换次数。
+
+每个异步结果包含 `queue`、原后端各阶段和 `end_to_end` 延迟。worker 异常不会
+静默退出，而会转换为 `prediction_failed` 事件。episode 结束时通过 generation
+取消等待及在途结果，因此即使复用相同 episode ID，旧 chunk 也无法进入新 episode。
+
+`run_realtime_runtime` 使用 monotonic wall clock 按固定周期唤醒控制线程，并记录
+`control_tick_lateness_s` 和 deadline miss。结束时会取消当前 episode 并关闭 worker；
+如果需要跨多个 episode 复用 worker，可传 `close_backend=False` 并由调用方最终调用
+`backend.close()`。
+
+线程方案让 CUDA 推理与 CPU 控制循环重叠，并避免跨进程复制模型。Python 预处理
+仍可能与控制线程竞争 GIL；若后续画像表明预处理成为主要瓶颈，再将纯 CPU 图像处理
+拆到进程池。
+
 ## 尚未完成的边界
 
-当前 `FluxVLABackend.request()` 是阻塞调用。它可以完成真实模型推理和延迟画像，也能将测得的延迟投影到虚拟时钟实验，但不能让真实 executor 与 GPU 推理同时运行。真正的异步执行需要下一步增加 worker thread/process、非阻塞 submit/poll、容量为一的 latest-observation mailbox 和 episode cancellation。
-
-目前尚未在本机安装 FluxVLA、下载 SmolVLA checkpoint 或运行 LIBERO。测试使用接口等价的 fake VLA，验证参数转发、三维 action 解码、逐动作反归一化、episode reset、分阶段计时和 runtime backend 注入。真实集成必须另外验证图像/state shape、动作周期、动作表示、统计文件和 CUDA 计时。
+目前尚未在本机安装 FluxVLA、下载 SmolVLA checkpoint 或运行 LIBERO。测试使用接口等价的 fake VLA，验证参数转发、三维 action 解码、逐动作反归一化、episode reset、分阶段计时、非阻塞提交、latest-observation 替换、异常传播、episode cancellation 和墙钟控制循环。真实集成必须另外验证图像/state shape、动作周期、动作表示、统计文件和 CUDA 计时。
