@@ -31,6 +31,22 @@ class SequenceTimer:
         return next(self.values)
 
 
+class FakeGpuTimer:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def start(self):
+        self.calls.append("start")
+        return "token"
+
+    def stop(self, token) -> None:
+        self.calls.append(("stop", token))
+
+    def elapsed_s(self, token) -> float:
+        self.calls.append(("elapsed", token))
+        return 0.123
+
+
 class FluxVLABackendTests(unittest.TestCase):
     def test_request_builds_timed_chunk_and_forwards_batch(self) -> None:
         vla = FakeVLA()
@@ -148,6 +164,35 @@ class FluxVLABackendTests(unittest.TestCase):
         self.assertGreater(len(backend.vla.calls), 0)
         stages = result.summary["prediction_stage_latency_s"]
         self.assertIn("inference", stages)
+
+    def test_throughput_mode_only_reports_completed_total(self) -> None:
+        synchronizations = []
+        gpu_timer = FakeGpuTimer()
+        backend = FluxVLABackend(
+            FakeVLA(),
+            preprocess=lambda obs: {"states": obs.state},
+            decode_actions=lambda raw: decode_first_batch(raw, 1),
+            action_spec=ActionSpec(1, 0.02),
+            timer=SequenceTimer((4.0, 4.1, 4.2, 4.5)),
+            synchronize=lambda: synchronizations.append(True),
+            timing_mode="throughput",
+            gpu_timer=gpu_timer,
+            inference_context=nullcontext,
+        )
+
+        pending = backend.request(
+            Observation("episode", 0, 0.0, (0.0,)), requested_at=1.0
+        )
+
+        self.assertEqual(len(synchronizations), 2)
+        self.assertEqual(
+            dict(pending.timings_s),
+            {"total": 0.5, "inference_gpu": 0.123},
+        )
+        self.assertEqual(
+            gpu_timer.calls,
+            ["start", ("stop", "token"), ("elapsed", "token")],
+        )
 
     def test_runtime_rejects_backend_action_semantics_mismatch(self) -> None:
         config = RuntimeConfig(duration_s=0.02, action_unit="libero_action")

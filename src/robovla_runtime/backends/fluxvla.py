@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack, nullcontext
-from typing import Any, ContextManager
+from typing import Any, ContextManager, Literal, Protocol
 
 from robovla_runtime.core.types import ActionChunk, ActionSpec, Observation
 
@@ -18,6 +18,14 @@ from .base import PendingPrediction
 
 Preprocessor = Callable[[Observation], Mapping[str, Any]]
 ActionDecoder = Callable[[Any], Sequence[Sequence[float]]]
+
+
+class GpuTimer(Protocol):
+    def start(self) -> Any: ...
+
+    def stop(self, token: Any) -> None: ...
+
+    def elapsed_s(self, token: Any) -> float: ...
 
 
 def _default_inference_context() -> ContextManager[Any]:
@@ -175,6 +183,8 @@ class FluxVLABackend:
         *,
         timer: Callable[[], float] = time.perf_counter,
         synchronize: Callable[[], None] | None = None,
+        timing_mode: Literal["diagnostic", "throughput"] = "diagnostic",
+        gpu_timer: GpuTimer | None = None,
         inference_context: Callable[[], ContextManager[Any]] = (
             _default_inference_context
         ),
@@ -184,12 +194,16 @@ class FluxVLABackend:
             raise TypeError("vla must provide a callable predict_action")
         if not callable(preprocess) or not callable(decode_actions):
             raise TypeError("preprocess and decode_actions must be callable")
+        if timing_mode not in {"diagnostic", "throughput"}:
+            raise ValueError("timing_mode must be diagnostic or throughput")
         self.vla = vla
         self.preprocess = preprocess
         self.decode_actions = decode_actions
         self.action_spec = action_spec
         self.timer = timer
         self.synchronize = synchronize or (lambda: None)
+        self.timing_mode = timing_mode
+        self.gpu_timer = gpu_timer
         self.inference_context = inference_context
         self._next_request_id = 0
 
@@ -202,6 +216,8 @@ class FluxVLABackend:
         *,
         timer: Callable[[], float] = time.perf_counter,
         synchronize: Callable[[], None] | None = None,
+        timing_mode: Literal["diagnostic", "throughput"] = "diagnostic",
+        gpu_timer: GpuTimer | None = None,
     ) -> "FluxVLABackend":
         """Create an adapter from an initialized FluxVLA LiberoEvalRunner."""
         predict_options = {}
@@ -243,6 +259,8 @@ class FluxVLABackend:
             action_spec,
             timer=timer,
             synchronize=synchronize,
+            timing_mode=timing_mode,
+            gpu_timer=gpu_timer,
             inference_context=inference_context,
         )
 
@@ -255,14 +273,24 @@ class FluxVLABackend:
         self.synchronize()
         started = self.timer()
         batch = dict(self.preprocess(observation))
-        self.synchronize()
+        if self.timing_mode == "diagnostic":
+            self.synchronize()
         preprocessed = self.timer()
+        gpu_token = self.gpu_timer.start() if self.gpu_timer is not None else None
         with self.inference_context():
             raw_actions = self.vla.predict_action(**batch)
-        self.synchronize()
+        if gpu_token is not None:
+            self.gpu_timer.stop(gpu_token)
+        if self.timing_mode == "diagnostic":
+            self.synchronize()
         inferred = self.timer()
         decoded = self.decode_actions(raw_actions)
+        if self.timing_mode == "throughput":
+            self.synchronize()
         finished = self.timer()
+        gpu_elapsed_s = (
+            self.gpu_timer.elapsed_s(gpu_token) if gpu_token is not None else None
+        )
 
         actions = tuple(tuple(float(value) for value in action) for action in decoded)
         if not actions:
@@ -290,12 +318,18 @@ class FluxVLABackend:
             spec=self.action_spec,
             actions=actions,
         )
-        timings = (
-            ("preprocess", stage_values[0]),
-            ("inference", stage_values[1]),
-            ("postprocess", stage_values[2]),
-            ("total", total_s),
-        )
+        if self.timing_mode == "diagnostic":
+            timing_values = [
+                ("preprocess", stage_values[0]),
+                ("inference", stage_values[1]),
+                ("postprocess", stage_values[2]),
+                ("total", total_s),
+            ]
+        else:
+            timing_values = [("total", total_s)]
+        if gpu_elapsed_s is not None:
+            timing_values.append(("inference_gpu", gpu_elapsed_s))
+        timings = tuple(timing_values)
         return PendingPrediction(
             request_id,
             requested_at,

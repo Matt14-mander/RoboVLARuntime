@@ -43,3 +43,4 @@ they are not VLA task-success or real-robot performance claims.
 - [第一阶段开发规格：确定性 Runtime Core](docs/PHASE1_IMPLEMENTATION.md)
 - [第一阶段基线结果](results/phase1_matrix.md)
 - [第二阶段 FluxVLABackend 接入说明](docs/PHASE2_FLUXVLA_BACKEND.md)
+- [FluxVLA Profiler 使用与计时语义](docs/FLUXVLA_PROFILER.md)
