@@ -53,7 +53,7 @@ deadline 从 scheduler 调用 submit 时开始，覆盖排队、模型 reset/预
 
 episode 结束时先回收当前可见结果，再取消 episode 的等待请求和在途结果归属。backend.close 使用有限等待，超过上限产生 `worker_shutdown_timeout`，运行函数可以返回。即使最后一次 poll 抛异常，也会尝试取消 episode 和关闭 worker。
 
-Python 线程方案不能强杀卡住的 CUDA/模型调用。close 超时后底层 daemon 线程仍可能运行、持有模型资源，但不会再发布结果；已关闭的 ThreadedPolicyBackend 不能复用。进程级终止与资源回收不是本轮实现。
+Python 线程方案不能强杀卡住的 CUDA/模型调用。close 超时后底层 daemon 线程仍可能运行、持有模型资源，但不会再发布结果；已关闭的 ThreadedPolicyBackend 不能复用。第四轮已提供可选的 [进程隔离后端](PROCESS_BACKEND.md)，支持终止、回收和重建进程；线程模式仍保留上述限制。
 
 使用 `close_backend=False` 时，取消仍会执行，但线程生命周期由调用方负责。下一次 Runtime 调用会建立新的 scheduler 并 reset 后端，沿用已有 generation 隔离和模型 reset 串行执行规则。真实有状态模型仍需提供正确的 reset 回调。
 

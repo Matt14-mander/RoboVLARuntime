@@ -10,8 +10,9 @@ from dataclasses import asdict, dataclass, replace
 from robovla_runtime.backends.base import PolicyBackend
 from robovla_runtime.backends.mock import MockBackend
 from robovla_runtime.backends.latency import LatencyTrace
-from robovla_runtime.backends.sleeping_mock import SleepingMockBackend
+from robovla_runtime.backends.sleeping_mock import SleepingMockFactory
 from robovla_runtime.backends.threaded import AsyncPolicyBackend, ThreadedPolicyBackend
+from robovla_runtime.backends.process import ProcessBackendConfig, ProcessPolicyBackend
 from robovla_runtime.core.clock import VirtualClock
 from robovla_runtime.core.events import Event, EventLog
 from robovla_runtime.core.types import ActionSpec, ExecutionRecord, Observation
@@ -51,6 +52,17 @@ class RuntimeConfig:
     worker_prefetch: str = "fixed"
     request_timeout_s: float = 0.5
     worker_close_timeout_s: float = 0.1
+    worker_isolation: str = "thread"
+    process_startup_timeout_s: float = 10.0
+    process_execution_timeout_s: float = 1.0
+    process_terminate_grace_s: float = 0.1
+    process_max_restarts: int = 3
+
+    def process_config(self) -> ProcessBackendConfig:
+        return ProcessBackendConfig(
+            self.process_startup_timeout_s, self.process_execution_timeout_s,
+            self.process_terminate_grace_s, self.process_max_restarts,
+        )
 
     def adaptive_config(self) -> AdaptivePrefetchConfig:
         return AdaptivePrefetchConfig(
@@ -65,6 +77,9 @@ class RuntimeConfig:
                 "scheduler must be sync, fixed_async, adaptive_async, or worker_async"
             )
         self.adaptive_config()
+        self.process_config()
+        if self.worker_isolation not in {"thread", "process"}:
+            raise ValueError("worker_isolation must be thread or process")
         if self.worker_prefetch not in {"fixed", "adaptive"}:
             raise ValueError("worker_prefetch must be fixed or adaptive")
         if not math.isfinite(self.request_timeout_s) or self.request_timeout_s <= 0:
@@ -298,6 +313,7 @@ def run_realtime_runtime(
                             max(0.0, timer() - started_at), "worker_shutdown_timeout",
                             timeout_s=config.worker_close_timeout_s,
                         )
+                scheduler.poll_diagnostics(max(0.0, timer() - started_at))
         finished_at = max(0.0, timer() - started_at)
 
     environment_metrics = environment.metrics()
@@ -350,11 +366,14 @@ def run_realtime_mock(
     if config.scheduler != "worker_async":
         raise ValueError("run_realtime_mock requires scheduler='worker_async'")
     spec = ActionSpec(len(config.initial_position), config.period_s, unit=config.action_unit)
-    blocking = SleepingMockBackend(MockBackend(
-        spec, config.chunk_size, config.latency_s, config.target_position,
-        latency_trace=latency_trace,
-    ))
-    backend = ThreadedPolicyBackend(blocking)
+    factory = SleepingMockFactory(
+        spec, config.chunk_size, config.latency_s, config.target_position, latency_trace,
+    )
+    backend = (
+        ProcessPolicyBackend(factory, spec, config=config.process_config())
+        if config.worker_isolation == "process"
+        else ThreadedPolicyBackend(factory())
+    )
     try:
         return run_realtime_runtime(config, backend)
     finally:

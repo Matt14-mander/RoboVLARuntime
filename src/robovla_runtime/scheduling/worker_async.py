@@ -68,12 +68,19 @@ class WorkerAsyncScheduler:
 
     def _timeout(self, now: float, request_id: int, request: _Request) -> None:
         self._retire(request_id, request, "request_timeout")
-        cancel_queued = getattr(self.backend, "cancel_queued", None)
-        cancelled = bool(cancel_queued(request_id)) if callable(cancel_queued) else False
+        expire = getattr(self.backend, "expire_request", None)
+        recovery = None
+        if callable(expire):
+            recovery = expire(request_id)
+            cancelled = recovery == "queued"
+        else:
+            cancel_queued = getattr(self.backend, "cancel_queued", None)
+            cancelled = bool(cancel_queued(request_id)) if callable(cancel_queued) else False
         self.event_log.emit(
             now, "prediction_timed_out", request_id=request_id,
             requested_at=request.requested_at, deadline_at=request.deadline_at,
             elapsed_s=now - request.requested_at, queued_cancelled=cancelled,
+            recovery=recovery,
         )
 
     def _discard(self, now: float, request_id: int, reason: str) -> None:
@@ -113,6 +120,7 @@ class WorkerAsyncScheduler:
         results = self.backend.poll()
         if self.clock is not None:
             now = max(now, self.clock())
+        self.poll_diagnostics(now)
         for result in results:
             request_id = result.request_id
             request = self._requests.get(request_id)
@@ -211,6 +219,12 @@ class WorkerAsyncScheduler:
             if now + 1e-12 >= request.deadline_at:
                 self._timeout(now, request_id, request)
 
+    def poll_diagnostics(self, now: float) -> None:
+        poll = getattr(self.backend, "poll_diagnostics", None)
+        if callable(poll):
+            for kind, data in poll():
+                self.event_log.emit(now, kind, **data)
+
     def cancel_episode(self, now: float, episode_id: str) -> None:
         dropped = set(self.backend.cancel_episode(episode_id))
         for request_id, request in tuple(self._requests.items()):
@@ -241,7 +255,12 @@ class WorkerAsyncScheduler:
             observation_id=observation.observation_id,
             state=list(observation.state),
         )
-        receipt = self.backend.submit(observation, now)
+        submit_with_deadline = getattr(self.backend, "submit_with_deadline", None)
+        receipt = (
+            submit_with_deadline(observation, now, now + self.request_timeout_s)
+            if callable(submit_with_deadline)
+            else self.backend.submit(observation, now)
+        )
         self._last_requested_at = now
         self._requests[receipt.request_id] = _Request(
             now, now + self.request_timeout_s, observation.episode_id,

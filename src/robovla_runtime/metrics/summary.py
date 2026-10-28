@@ -83,6 +83,14 @@ def summarize(
         "worker_shutdown_timeout_count": sum(
             event.type == "worker_shutdown_timeout" for event in events
         ),
+        "process_worker": {
+            "starts": sum(event.type == "process_worker_started" for event in events),
+            "restarts": sum(event.type == "process_worker_restarted" for event in events),
+            "terminations": sum(event.type == "process_worker_terminated" for event in events),
+            "faults": sum(event.type == "process_worker_fault" for event in events),
+            "restart_exhaustions": sum(event.type == "process_restart_exhausted" for event in events),
+            "termination_failures": sum(event.type == "process_termination_failed" for event in events),
+        },
         "prediction_request_count": sum(
             event.type in {"prediction_requested", "prediction_submitted"}
             for event in events

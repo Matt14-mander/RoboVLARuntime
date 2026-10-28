@@ -4,11 +4,28 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from .base import PendingPrediction
 from .mock import MockBackend
-from robovla_runtime.core.types import Observation
+from .latency import LatencyTrace
+from robovla_runtime.core.types import ActionSpec, Observation
+
+
+@dataclass(frozen=True, slots=True)
+class SleepingMockFactory:
+    """Serializable construction recipe; the model is built in its owner."""
+    action_spec: ActionSpec
+    chunk_size: int
+    latency_s: tuple[float, ...]
+    target: tuple[float, ...]
+    latency_trace: LatencyTrace | None = None
+
+    def __call__(self) -> SleepingMockBackend:
+        return SleepingMockBackend(MockBackend(
+            self.action_spec, self.chunk_size, self.latency_s, self.target,
+            latency_trace=self.latency_trace,
+        ))
 
 
 class SleepingMockBackend:

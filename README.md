@@ -55,6 +55,8 @@ they are not VLA task-success or real-robot performance claims.
 - [自适应 / 固定异步对照结果](results/adaptive_matrix.md)
 - [Worker 墙钟自适应、超时与迟到结果](docs/WORKER_ADAPTIVE.md)
 - [Worker 模拟验证结果](results/worker_smoke.md)
+- [进程隔离、卡死终止与状态恢复](docs/PROCESS_BACKEND.md)
+- [进程恢复模拟验证结果](results/process_recovery.md)
 
 Synthetic adaptive-prefetch experiments (virtual time):
 
@@ -76,4 +78,11 @@ python benchmarks/run_worker_smoke.py
 ```
 
 Worker prefetch can be fixed or adaptive. Request deadlines reject late results,
-and shutdown waits are bounded; timing out does not forcibly terminate inference.
+and shutdown waits are bounded. Thread mode cannot forcibly terminate inference.
+Process mode owns the model in a spawned child and can terminate, reap, and
+recreate it after a timeout, with fresh model state and a bounded restart budget.
+
+```powershell
+python -m robovla_runtime.cli run-worker-mock --config configs/process_adaptive.toml
+python -m benchmarks.run_process_recovery --output-dir runs/process_recovery_rerun
+```

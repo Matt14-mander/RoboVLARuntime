@@ -1,0 +1,158 @@
+{
+  "scope": "spawn/termination/restart smoke with synthetic state; no real model or GPU",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python_version": "3.12.3",
+  "config": {
+    "scheduler": "worker_async",
+    "period_s": 0.02,
+    "duration_s": 4.0,
+    "chunk_size": 100,
+    "execute_horizon": 20,
+    "latency_s": [
+      0.05
+    ],
+    "prefetch_threshold_s": 0.08,
+    "initial_position": [
+      0.0
+    ],
+    "target_position": [
+      1.0
+    ],
+    "max_velocity": 2.0,
+    "deadline_tolerance_s": 0.001,
+    "action_unit": "normalized",
+    "seed": 7,
+    "adaptive_window_size": 20,
+    "adaptive_quantile": 0.95,
+    "adaptive_margin_s": 0.02,
+    "adaptive_hysteresis_s": 0.01,
+    "adaptive_min_request_interval_s": 0.02,
+    "worker_prefetch": "adaptive",
+    "request_timeout_s": 0.3,
+    "worker_close_timeout_s": 1.0,
+    "worker_isolation": "process",
+    "process_startup_timeout_s": 2.0,
+    "process_execution_timeout_s": 1.0,
+    "process_terminate_grace_s": 0.1,
+    "process_max_restarts": 1
+  },
+  "rows": [
+    {
+      "scenario": "healthy",
+      "ticks": 200,
+      "starts": 1,
+      "terminations": 1,
+      "restarts": 0,
+      "restart_exhaustions": 0,
+      "request_timeouts": 0,
+      "fallback_ticks": 37,
+      "executed_ticks": 163,
+      "first_command": [
+        1.0
+      ],
+      "first_execution_s": 0.2807643999985885,
+      "timed_out_actions_executed": 0,
+      "artifacts": "runs/process_recovery_checked/healthy/20261028T053037.246449Z-worker_async"
+    },
+    {
+      "scenario": "inference_hang",
+      "ticks": 200,
+      "starts": 2,
+      "terminations": 2,
+      "restarts": 1,
+      "restart_exhaustions": 0,
+      "request_timeouts": 4,
+      "fallback_ticks": 85,
+      "executed_ticks": 115,
+      "first_command": [
+        1.0
+      ],
+      "first_execution_s": 1.3002836999949068,
+      "timed_out_actions_executed": 0,
+      "artifacts": "runs/process_recovery_checked/inference_hang/20261028T053041.253728Z-worker_async"
+    },
+    {
+      "scenario": "reset_hang",
+      "ticks": 200,
+      "starts": 2,
+      "terminations": 2,
+      "restarts": 1,
+      "restart_exhaustions": 0,
+      "request_timeouts": 2,
+      "fallback_ticks": 59,
+      "executed_ticks": 141,
+      "first_command": [
+        1.0
+      ],
+      "first_execution_s": 0.700310799991712,
+      "timed_out_actions_executed": 0,
+      "artifacts": "runs/process_recovery_checked/reset_hang/20261028T053045.253082Z-worker_async"
+    },
+    {
+      "scenario": "startup_hang",
+      "ticks": 200,
+      "starts": 2,
+      "terminations": 2,
+      "restarts": 1,
+      "restart_exhaustions": 0,
+      "request_timeouts": 7,
+      "fallback_ticks": 138,
+      "executed_ticks": 62,
+      "first_command": [
+        1.0
+      ],
+      "first_execution_s": 2.4602397000126075,
+      "timed_out_actions_executed": 0,
+      "artifacts": "runs/process_recovery_checked/startup_hang/20261028T053049.253218Z-worker_async"
+    },
+    {
+      "scenario": "crash",
+      "ticks": 200,
+      "starts": 2,
+      "terminations": 2,
+      "restarts": 1,
+      "restart_exhaustions": 0,
+      "request_timeouts": 0,
+      "fallback_ticks": 51,
+      "executed_ticks": 149,
+      "first_command": [
+        1.0
+      ],
+      "first_execution_s": 0.48053790000267327,
+      "timed_out_actions_executed": 0,
+      "artifacts": "runs/process_recovery_checked/crash/20261028T053053.246546Z-worker_async"
+    },
+    {
+      "scenario": "inference_error",
+      "ticks": 200,
+      "starts": 2,
+      "terminations": 2,
+      "restarts": 1,
+      "restart_exhaustions": 0,
+      "request_timeouts": 1,
+      "fallback_ticks": 76,
+      "executed_ticks": 124,
+      "first_command": [
+        1.0
+      ],
+      "first_execution_s": 0.8604875000019092,
+      "timed_out_actions_executed": 0,
+      "artifacts": "runs/process_recovery_checked/inference_error/20261028T053057.240495Z-worker_async"
+    },
+    {
+      "scenario": "restart_exhausted",
+      "ticks": 200,
+      "starts": 2,
+      "terminations": 2,
+      "restarts": 1,
+      "restart_exhaustions": 1,
+      "request_timeouts": 4,
+      "fallback_ticks": 200,
+      "executed_ticks": 0,
+      "first_command": null,
+      "first_execution_s": null,
+      "timed_out_actions_executed": 0,
+      "artifacts": "runs/process_recovery_checked/restart_exhausted/20261028T053101.232103Z-worker_async"
+    }
+  ]
+}

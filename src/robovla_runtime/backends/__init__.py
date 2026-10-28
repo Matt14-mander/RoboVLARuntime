@@ -7,6 +7,7 @@ from .fluxvla import (
 )
 from .mock import MockBackend
 from .sleeping_mock import SleepingMockBackend
+from .process import ProcessBackendConfig, ProcessPolicyBackend
 from .latency import LatencyTrace, make_latency_trace
 from .threaded import (
     AsyncPolicyBackend,
@@ -21,6 +22,8 @@ __all__ = [
     "AsyncPolicyBackend",
     "MockBackend",
     "SleepingMockBackend",
+    "ProcessBackendConfig",
+    "ProcessPolicyBackend",
     "LatencyTrace",
     "make_latency_trace",
     "PendingPrediction",

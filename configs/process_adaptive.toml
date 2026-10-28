@@ -1,0 +1,16 @@
+[runtime]
+scheduler = "worker_async"
+worker_prefetch = "adaptive"
+worker_isolation = "process"
+period_s = 0.02
+duration_s = 3.0
+chunk_size = 20
+execute_horizon = 20
+latency_s = [0.03]
+prefetch_threshold_s = 0.08
+request_timeout_s = 0.15
+worker_close_timeout_s = 1.0
+process_startup_timeout_s = 5.0
+process_execution_timeout_s = 0.5
+process_terminate_grace_s = 0.1
+process_max_restarts = 3
