@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from robovla_runtime.core.events import EventLog
+from robovla_runtime.backends.latency import LatencyTrace
 from robovla_runtime.integrations.fluxvla_libero import (
     create_libero_profile_session,
 )
@@ -50,6 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", help="run a deterministic simulation")
     run.add_argument("--config", required=True)
     run.add_argument("--output-root", default="runs")
+    run.add_argument(
+        "--latency-trace", help="time-indexed synthetic latency JSON; overrides latency_s"
+    )
     profile = subparsers.add_parser(
         "profile-fluxvla", help="profile FluxVLA on one valid LIBERO observation"
     )
@@ -77,8 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "run":
         config = load_config(args.config)
-        result = run_simulation(config)
+        trace = LatencyTrace.read(args.latency_trace) if args.latency_trace else None
+        result = run_simulation(config, latency_trace=trace)
         run_dir = write_result(result, args.output_root)
+        if trace is not None:
+            trace.write(run_dir / "latency_trace.json")
         print(json.dumps(result.summary, indent=2, sort_keys=True))
         print(f"artifacts: {run_dir}")
         return 0

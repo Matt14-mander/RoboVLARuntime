@@ -16,7 +16,9 @@ class BaseScheduler:
         self.event_log = event_log
         self.pending: PendingPrediction | None = None
 
-    def _poll(self, now: float, action_buffer: ActionBuffer) -> None:
+    def _poll(
+        self, now: float, action_buffer: ActionBuffer
+    ) -> PendingPrediction | None:
         if self.pending is None or not self.pending.is_ready(now):
             return
         pending = self.pending
@@ -39,6 +41,7 @@ class BaseScheduler:
             dropped_prefix_actions=result.dropped_prefix_actions,
             coverage_s=action_buffer.coverage_s(now),
         )
+        return pending
 
     def _request(
         self,

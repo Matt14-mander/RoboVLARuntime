@@ -51,3 +51,17 @@ they are not VLA task-success or real-robot performance claims.
 - [第二阶段 FluxVLABackend 接入说明](docs/PHASE2_FLUXVLA_BACKEND.md)
 - [FluxVLA Profiler 使用与计时语义](docs/FLUXVLA_PROFILER.md)
 - [环境适配、动作契约与 reset](docs/ENVIRONMENT_ADAPTER.md)
+- [自适应预取与合成延迟故障](docs/ADAPTIVE_PREFETCH.md)
+- [自适应 / 固定异步对照结果](results/adaptive_matrix.md)
+
+Synthetic adaptive-prefetch experiments (virtual time):
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m robovla_runtime.cli run --config configs/adaptive_synthetic.toml
+python benchmarks/run_adaptive_matrix.py
+```
+
+The matrix compares fixed and adaptive scheduling on shared time-indexed fixed,
+long-tail, and overload traces. It retains unfavorable cases and reports request
+counts alongside fallback and observation age; these are not real-model results.

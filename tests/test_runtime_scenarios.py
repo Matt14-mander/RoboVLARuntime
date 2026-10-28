@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import unittest
+import json
+from pathlib import Path
 
 from robovla_runtime.runtime import RuntimeConfig, run_simulation
 
 
 class RuntimeScenarioTests(unittest.TestCase):
+    def test_original_mock_matrix_matches_checked_in_baseline(self):
+        from benchmarks.run_phase1_matrix import run_matrix
+
+        path = Path(__file__).resolve().parents[1] / "results" / "phase1_matrix.json"
+        expected = json.loads(path.read_text(encoding="utf-8"))["rows"]
+        self.assertEqual(run_matrix(), expected)
+
     def config(self, scheduler: str, latency: float, threshold: float = 0.08):
         return RuntimeConfig(
             scheduler=scheduler,

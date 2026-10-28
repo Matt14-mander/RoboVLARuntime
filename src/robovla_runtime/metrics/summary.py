@@ -58,6 +58,12 @@ def summarize(
         event.type == "mailbox_request_replaced" for event in events
     )
     prediction_failures = sum(event.type == "prediction_failed" for event in events)
+    estimates = [event for event in events if event.type == "prefetch_estimate_updated"]
+    rejected: dict[str, int] = {}
+    for event in events:
+        if event.type == "chunk_rejected":
+            reason = str(event.data["reason"])
+            rejected[reason] = rejected.get(reason, 0) + 1
     jumps = [
         math.sqrt(
             sum((right - left) ** 2 for left, right in zip(a.command, b.command))
@@ -68,6 +74,24 @@ def summarize(
         "ticks": len(records),
         "prediction_count": len(latencies),
         "prediction_failure_count": prediction_failures,
+        "prediction_request_count": sum(
+            event.type in {"prediction_requested", "prediction_submitted"}
+            for event in events
+        ),
+        "chunk_rejection_counts": rejected,
+        "adaptive_prefetch": {
+            "completed_samples": len(estimates),
+            "final_threshold_s": estimates[-1].data["threshold_s"] if estimates else None,
+            "max_threshold_s": max(
+                (float(event.data["threshold_s"]) for event in estimates), default=None
+            ),
+            "threshold_capped_samples": sum(
+                bool(event.data["threshold_capped"]) for event in estimates
+            ),
+            "supply_limited_samples": sum(
+                float(event.data["supply_shortfall_s"]) > 1e-12 for event in estimates
+            ),
+        },
         "mailbox_replacement_count": mailbox_replacements,
         "prediction_latency_s": {
             "samples": len(latencies),

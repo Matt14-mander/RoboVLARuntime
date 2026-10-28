@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from robovla_runtime.core.types import ActionChunk, ActionSpec, Observation
 
 from .base import PendingPrediction
+from .latency import LatencyTrace
 
 
 class MockBackend:
@@ -16,6 +17,8 @@ class MockBackend:
         chunk_size: int,
         latency_s: float | Sequence[float],
         target: tuple[float, ...],
+        *,
+        latency_trace: LatencyTrace | None = None,
     ) -> None:
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
@@ -32,6 +35,7 @@ class MockBackend:
         self.action_spec = action_spec
         self.chunk_size = chunk_size
         self.latencies = latencies
+        self.latency_trace = latency_trace
         self.target = target
         self._next_request_id = 0
         self._episode_request_index = 0
@@ -46,7 +50,11 @@ class MockBackend:
     ) -> PendingPrediction:
         request_id = self._next_request_id
         self._next_request_id += 1
-        latency = self.latencies[self._episode_request_index % len(self.latencies)]
+        latency = (
+            self.latency_trace.at(requested_at)
+            if self.latency_trace is not None
+            else self.latencies[self._episode_request_index % len(self.latencies)]
+        )
         self._episode_request_index += 1
         ready_at = requested_at + latency
         actions = tuple(
@@ -67,5 +75,6 @@ class MockBackend:
             actions=actions,
             episode_generation=observation.episode_generation,
         )
-        return PendingPrediction(request_id, requested_at, ready_at, chunk)
+        timings = (("synthetic_latency", latency),) if self.latency_trace else ()
+        return PendingPrediction(request_id, requested_at, ready_at, chunk, timings)
 

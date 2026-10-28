@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 
 from robovla_runtime.backends.base import PolicyBackend
 from robovla_runtime.backends.mock import MockBackend
+from robovla_runtime.backends.latency import LatencyTrace
 from robovla_runtime.backends.threaded import AsyncPolicyBackend
 from robovla_runtime.core.clock import VirtualClock
 from robovla_runtime.core.events import Event, EventLog
@@ -17,6 +19,10 @@ from robovla_runtime.execution.action_buffer import ActionBuffer
 from robovla_runtime.execution.executor import Executor
 from robovla_runtime.metrics.summary import summarize
 from robovla_runtime.scheduling.fixed_async import FixedAsyncScheduler
+from robovla_runtime.scheduling.adaptive import (
+    AdaptiveAsyncScheduler,
+    AdaptivePrefetchConfig,
+)
 from robovla_runtime.scheduling.sync import SyncScheduler
 from robovla_runtime.scheduling.worker_async import WorkerAsyncScheduler
 
@@ -36,17 +42,38 @@ class RuntimeConfig:
     deadline_tolerance_s: float = 0.001
     action_unit: str = "normalized"
     seed: int = 7
+    adaptive_window_size: int = 20
+    adaptive_quantile: float = 0.95
+    adaptive_margin_s: float = 0.02
+    adaptive_hysteresis_s: float = 0.01
+    adaptive_min_request_interval_s: float = 0.02
+
+    def adaptive_config(self) -> AdaptivePrefetchConfig:
+        return AdaptivePrefetchConfig(
+            self.adaptive_window_size, self.adaptive_quantile,
+            self.adaptive_margin_s, self.adaptive_hysteresis_s,
+            self.adaptive_min_request_interval_s,
+        )
 
     def __post_init__(self) -> None:
-        if self.scheduler not in {"sync", "fixed_async", "worker_async"}:
-            raise ValueError("scheduler must be sync, fixed_async, or worker_async")
+        if self.scheduler not in {"sync", "fixed_async", "adaptive_async", "worker_async"}:
+            raise ValueError(
+                "scheduler must be sync, fixed_async, adaptive_async, or worker_async"
+            )
+        self.adaptive_config()
+        if any(not math.isfinite(value) or value < 0 for value in (
+            self.period_s, self.duration_s, self.prefetch_threshold_s,
+        )):
+            raise ValueError("runtime timing must be finite and non-negative")
         if self.period_s <= 0 or self.duration_s <= 0:
             raise ValueError("period and duration must be positive")
         if self.chunk_size <= 0 or self.execute_horizon <= 0:
             raise ValueError("chunk sizes must be positive")
         if self.execute_horizon > self.chunk_size:
             raise ValueError("execute_horizon cannot exceed chunk_size")
-        if not self.latency_s or any(value < 0 for value in self.latency_s):
+        if not self.latency_s or any(
+            not math.isfinite(value) or value < 0 for value in self.latency_s
+        ):
             raise ValueError("latency trace must be non-empty and non-negative")
         if len(self.initial_position) != len(self.target_position):
             raise ValueError("initial and target positions must have equal dimensions")
@@ -148,6 +175,11 @@ def run_runtime(
     )
     if config.scheduler == "sync":
         scheduler = SyncScheduler(backend, log)
+    elif config.scheduler == "adaptive_async":
+        scheduler = AdaptiveAsyncScheduler(
+            backend, log, config.prefetch_threshold_s,
+            config.execute_horizon * action_spec.period_s, config.adaptive_config(),
+        )
     else:
         scheduler = FixedAsyncScheduler(
             backend, log, config.prefetch_threshold_s
@@ -274,7 +306,9 @@ def run_realtime_runtime(
     )
 
 
-def run_simulation(config: RuntimeConfig) -> SimulationResult:
+def run_simulation(
+    config: RuntimeConfig, *, latency_trace: LatencyTrace | None = None
+) -> SimulationResult:
     """Run the built-in deterministic mock experiment."""
     action_spec = ActionSpec(
         dimension=len(config.initial_position),
@@ -287,6 +321,7 @@ def run_simulation(config: RuntimeConfig) -> SimulationResult:
         config.chunk_size,
         config.latency_s,
         config.target_position,
+        latency_trace=latency_trace,
     )
     return run_runtime(config, backend)
 

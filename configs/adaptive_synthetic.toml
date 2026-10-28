@@ -1,0 +1,14 @@
+[runtime]
+scheduler = "adaptive_async"
+period_s = 0.02
+duration_s = 20.0
+chunk_size = 10
+execute_horizon = 10
+latency_s = [0.10]
+prefetch_threshold_s = 0.08
+adaptive_window_size = 20
+adaptive_quantile = 0.95
+adaptive_margin_s = 0.02
+adaptive_hysteresis_s = 0.01
+adaptive_min_request_interval_s = 0.02
+seed = 7
