@@ -1,6 +1,6 @@
 # RoboVLA-Runtime 开发路线
 
-规划日期：2026-09-04。当前仓库只有 README，以下均为待开发内容，不代表已有实现或实验结果。
+原规划日期：2026-09-04。状态更新：2026-10-28。确定性 runtime、异步 worker、FluxVLA adapter 与 profiler 已实现；本轮完成 EnvironmentAdapter、ToyJoint 迁移、扩展动作契约及 episode reset，见[实现说明](ENVIRONMENT_ADAPTER.md)。真实 checkpoint 和 LIBERO 闭环尚未验证。下文保留原始分阶段计划，未勾选条目不能直接作为当前完成情况。
 
 ## 1. 项目定位与边界
 
@@ -92,7 +92,7 @@ All components -> event trace -> metrics -> reproducible report
 
 Python 负责策略编排、调度实验和日志；底层伺服通过已有控制器接入，不对通用操作系统上的 Python 循环宣称硬实时保证。先做进程内/本机通信，真实网络在后续加入。
 
-建议目录（尚未创建实现）：
+原规划目录（实际实现布局以 src/ 为准）：
 
 ```text
 src/robovla_runtime/

@@ -27,7 +27,7 @@ def summarize(
     records: list[ExecutionRecord],
     events: tuple[Event, ...],
     period_s: float,
-    final_tracking_error: float,
+    final_tracking_error: float | None,
 ) -> dict[str, object]:
     latencies = [
         float(event.data["latency_s"])

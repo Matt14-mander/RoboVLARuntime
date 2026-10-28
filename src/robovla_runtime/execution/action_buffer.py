@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
-from robovla_runtime.core.types import ActionChunk
+from robovla_runtime.core.types import ActionChunk, ActionSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +32,11 @@ class ActionBuffer:
     """
 
     def __init__(
-        self, episode_id: str, max_actions_per_chunk: int | None = None
+        self,
+        episode_id: str,
+        max_actions_per_chunk: int | None = None,
+        *,
+        action_spec: ActionSpec | None = None,
     ) -> None:
         if not episode_id:
             raise ValueError("episode_id must not be empty")
@@ -40,6 +44,10 @@ class ActionBuffer:
         if max_actions_per_chunk is not None and max_actions_per_chunk <= 0:
             raise ValueError("max_actions_per_chunk must be positive")
         self.max_actions_per_chunk = max_actions_per_chunk
+        if action_spec is not None:
+            action_spec.require_time_aligned_execution()
+        self.action_spec = action_spec
+        self.episode_generation = 0
         self._chunk: ActionChunk | None = None
         self._seen_requests: set[int] = set()
         self._consumed: set[tuple[int, int]] = set()
@@ -49,12 +57,21 @@ class ActionBuffer:
             raise ValueError("episode_id must not be empty")
         self.episode_id = episode_id
         self._chunk = None
+        self.episode_generation += 1
         self._seen_requests.clear()
         self._consumed.clear()
 
     def accept(self, chunk: ActionChunk, now: float) -> ChunkAcceptance:
         if chunk.episode_id != self.episode_id:
             return ChunkAcceptance(False, "wrong_episode")
+        if chunk.episode_generation != self.episode_generation:
+            return ChunkAcceptance(False, "wrong_generation")
+        try:
+            chunk.spec.require_time_aligned_execution()
+        except ValueError:
+            return ChunkAcceptance(False, "unsupported_action_spec")
+        if self.action_spec is not None and chunk.spec != self.action_spec:
+            return ChunkAcceptance(False, "action_spec_mismatch")
         if chunk.request_id in self._seen_requests:
             return ChunkAcceptance(False, "duplicate")
         self._seen_requests.add(chunk.request_id)

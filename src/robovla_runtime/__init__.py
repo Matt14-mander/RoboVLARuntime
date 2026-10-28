@@ -1,5 +1,6 @@
 """Resource-aware runtime experiments for chunked robot policies."""
 
+from .environments import EnvironmentAdapter
 from .runtime import (
     RuntimeConfig,
     SimulationResult,
@@ -9,6 +10,7 @@ from .runtime import (
 )
 
 __all__ = [
+    "EnvironmentAdapter",
     "RuntimeConfig",
     "SimulationResult",
     "run_realtime_runtime",

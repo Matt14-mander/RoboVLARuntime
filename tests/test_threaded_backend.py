@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import unittest
-from threading import Event
+from threading import Event, get_ident
 
 from robovla_runtime.backends.base import PendingPrediction
 from robovla_runtime.backends.threaded import (
@@ -21,6 +21,9 @@ class GateBackend:
         self.started = Event()
         self.observation_ids: list[int] = []
 
+    def reset(self, episode_id: str) -> None:
+        pass  # This fixture has no model history.
+
     def request(self, observation: Observation, requested_at: float):
         self.observation_ids.append(observation.observation_id)
         self.started.set()
@@ -37,6 +40,7 @@ class GateBackend:
             start_at=observation.captured_at,
             spec=self.action_spec,
             actions=((1.0,),) * 10,
+            episode_generation=observation.episode_generation,
         )
         return PendingPrediction(999, requested_at, requested_at, chunk)
 
@@ -52,6 +56,67 @@ def collect_results(backend, count: int, timeout_s: float = 1.0):
 
 
 class ThreadedPolicyBackendTests(unittest.TestCase):
+    def test_reset_is_serialized_after_inflight_request_and_clears_model_history(self):
+        gate = Event()
+
+        class StatefulBackend(GateBackend):
+            def __init__(self):
+                super().__init__(gate)
+                self.history = []
+                self.history_before_request = []
+                self.reset_threads = []
+                self.request_threads = []
+
+            def reset(self, episode_id):
+                self.reset_threads.append(get_ident())
+                self.history.clear()
+
+            def request(self, observation, requested_at):
+                self.request_threads.append(get_ident())
+                self.history_before_request.append(list(self.history))
+                result = super().request(observation, requested_at)
+                self.history.append(observation.observation_id)
+                return result
+
+        blocking = StatefulBackend()
+        backend = ThreadedPolicyBackend(blocking)
+        try:
+            backend.submit(Observation("same", 0, 0.0, (0.0,)), 0.0)
+            self.assertTrue(blocking.started.wait(0.5))
+            backend.submit(Observation("same", 1, 0.01, (0.0,)), 0.01)
+            backend.reset("same")
+            # Reset never touches model state concurrently with the old request.
+            self.assertEqual(len(blocking.reset_threads), 1)
+            receipt = backend.submit(Observation("same", 2, 0.02, (0.0,)), 0.02)
+            gate.set()
+            results = collect_results(backend, 1)
+            self.assertEqual([item.request_id for item in results], [receipt.request_id])
+            self.assertEqual(blocking.observation_ids, [0, 2])
+            self.assertEqual(blocking.history_before_request, [[], []])
+            self.assertEqual(blocking.history, [2])
+            self.assertEqual(blocking.reset_threads, blocking.request_threads)
+            self.assertNotEqual(blocking.reset_threads[0], get_ident())
+        finally:
+            gate.set()
+            self.assertTrue(backend.close(1.0))
+
+    def test_reset_failure_is_reported_without_running_inference(self):
+        class BadResetBackend(GateBackend):
+            def reset(self, episode_id):
+                raise RuntimeError("reset failed")
+
+        blocking = BadResetBackend()
+        backend = ThreadedPolicyBackend(blocking)
+        try:
+            backend.submit(Observation("ep", 0, 0.0, (0.0,)), 0.0)
+            results = collect_results(backend, 1)
+            self.assertEqual(len(results), 1)
+            self.assertIsInstance(results[0], PredictionFailure)
+            self.assertEqual(results[0].message, "reset failed")
+            self.assertFalse(blocking.started.is_set())
+        finally:
+            self.assertTrue(backend.close(1.0))
+
     def test_submit_is_non_blocking_and_mailbox_keeps_latest(self) -> None:
         gate = Event()
         blocking = GateBackend(gate)

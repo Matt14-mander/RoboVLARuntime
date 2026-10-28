@@ -130,6 +130,51 @@ class FluxVLABackendTests(unittest.TestCase):
             [("libero_spatial_no_noops", "libero_spatial")] * 2,
         )
 
+    def test_explicit_reset_clears_same_episode_preprocessing_and_model_history(self):
+        inputs = []
+
+        class StatefulVLA(FakeVLA):
+            def __init__(self):
+                super().__init__()
+                self.history = []
+
+            def reset(self):
+                self.history.clear()
+
+            def predict_action(self, **batch):
+                self.history.append(batch)
+                return super().predict_action(**batch)
+
+        def dataset(raw):
+            inputs.append(raw)
+            return {"states": (0.0,)}
+
+        model = StatefulVLA()
+        preprocess = FluxVLALiberoPreprocessor(dataset, "pick", "stats")
+        backend = FluxVLABackend(
+            model, preprocess, decode_first_batch, ActionSpec(1, 0.02),
+            timer=lambda: 0.0, inference_context=nullcontext,
+        )
+        observation = Observation("same", 0, 0.0, (0.0,), {"camera": "frame"}, 3)
+        first = backend.request(observation, 0.0)
+        backend.request(observation, 0.0)
+        backend.reset("same")
+        third = backend.request(observation, 0.0)
+        self.assertEqual([raw["is_new_episode"] for raw in inputs], [True, False, True])
+        self.assertEqual(len(model.history), 1)
+        self.assertEqual(third.chunk.episode_generation, 3)
+        self.assertGreater(third.request_id, first.request_id)
+
+    def test_custom_model_reset_hook_is_used(self):
+        resets = []
+        backend = FluxVLABackend(
+            FakeVLA(), lambda obs: {}, decode_first_batch, ActionSpec(1, 0.02),
+            reset_model=lambda: resets.append("reset"),
+        )
+        backend.reset("same")
+        backend.reset("same")
+        self.assertEqual(resets, ["reset", "reset"])
+
     def test_libero_decoder_treats_rank_two_as_batched_single_action(self) -> None:
         decode = make_libero_action_decoder(
             lambda data: data["action"], "stats", execute_horizon=10

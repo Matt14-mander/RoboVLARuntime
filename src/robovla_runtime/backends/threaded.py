@@ -34,6 +34,8 @@ AsyncResult = PendingPrediction | PredictionFailure
 class AsyncPolicyBackend(Protocol):
     action_spec: ActionSpec
 
+    def reset(self, episode_id: str) -> None: ...
+
     def submit(
         self, observation: Observation, requested_at: float
     ) -> SubmissionReceipt: ...
@@ -69,6 +71,8 @@ class ThreadedPolicyBackend:
         timer=time.perf_counter,
         thread_name: str = "robovla-policy-worker",
     ) -> None:
+        if not callable(getattr(backend, "reset", None)):
+            raise TypeError("backend must implement reset(episode_id), even if stateless")
         self.backend = backend
         self.action_spec = backend.action_spec
         self.timer = timer
@@ -78,8 +82,27 @@ class ThreadedPolicyBackend:
         self._episode_generations: dict[str, int] = {}
         self._next_request_id = 0
         self._closed = False
+        self._active_episode: tuple[str, int] | None = None
         self._worker = Thread(target=self._run, name=thread_name, daemon=True)
         self._worker.start()
+
+    def reset(self, episode_id: str) -> None:
+        """Invalidate all old work without racing model state on the worker.
+
+        Actual backend.reset is serialized immediately before the first request
+        in the new generation. An in-flight old call may finish, but cannot
+        publish a result or mutate state after that reset.
+        """
+        if not episode_id:
+            raise ValueError("episode_id must not be empty")
+        with self._condition:
+            if self._closed:
+                raise RuntimeError("threaded backend is closed")
+            self._episode_generations.setdefault(episode_id, 0)
+            for key in self._episode_generations:
+                self._episode_generations[key] += 1
+            self._queued = None
+            self._results.clear()
 
     def submit(
         self, observation: Observation, requested_at: float
@@ -158,6 +181,12 @@ class ThreadedPolicyBackend:
             worker_started = self.timer()
             queue_delay_s = max(0.0, worker_started - submission.enqueued_at)
             try:
+                episode_key = (
+                    submission.observation.episode_id, submission.episode_generation
+                )
+                if episode_key != self._active_episode:
+                    self.backend.reset(submission.observation.episode_id)
+                    self._active_episode = episode_key
                 prediction = self.backend.request(
                     submission.observation,
                     submission.requested_at + queue_delay_s,
@@ -194,5 +223,8 @@ class ThreadedPolicyBackend:
                 current_generation = self._episode_generations.get(
                     submission.observation.episode_id, 0
                 )
-                if submission.episode_generation == current_generation:
+                if (
+                    not self._closed
+                    and submission.episode_generation == current_generation
+                ):
                     self._results.append(result)

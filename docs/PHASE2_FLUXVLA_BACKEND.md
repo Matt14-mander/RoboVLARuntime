@@ -143,11 +143,14 @@ result = run_realtime_runtime(
 )
 ```
 
-这里的 `run_realtime_runtime` 仍使用项目自带的 `ToyJoint`，用于验证墙钟调度、
+这里的 `run_realtime_runtime` 默认使用项目自带的 `ToyJoint`，用于验证墙钟调度、
 buffer 和并发行为；`read_libero_observation()` 是需要由调用方提供的采集函数。
 它不能代替 `LiberoEvalRunner` 的 `env.step()`，也不能把 LIBERO 的末端增量动作
 解释成 toy joint 的绝对位置。接入真实 LIBERO/机器人闭环前还需要单独的环境执行
-适配器和匹配的 ActionSpec。
+适配器和匹配的 ActionSpec。现在可以通过 `environment=adapter` 注入环境；当前
+执行链仍仅支持绝对关节位置，其他动作语义会在启动时被拒绝，详见
+[环境适配、动作契约与 reset](ENVIRONMENT_ADAPTER.md)。自定义后端需要实现
+`reset(episode_id)`，并将 Observation 的 `episode_generation` 复制到返回 chunk。
 
 worker 同时最多持有一个正在执行的请求和一个等待请求。控制循环提交更近的
 observation 时，会原子替换等待请求，避免按 FIFO 累积陈旧 observation。

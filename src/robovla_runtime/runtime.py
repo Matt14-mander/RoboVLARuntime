@@ -1,10 +1,10 @@
-"""Composition root for phase-one deterministic simulations."""
+"""Deterministic and wall-clock loops composed with environment adapters."""
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 from robovla_runtime.backends.base import PolicyBackend
 from robovla_runtime.backends.mock import MockBackend
@@ -12,7 +12,7 @@ from robovla_runtime.backends.threaded import AsyncPolicyBackend
 from robovla_runtime.core.clock import VirtualClock
 from robovla_runtime.core.events import Event, EventLog
 from robovla_runtime.core.types import ActionSpec, ExecutionRecord, Observation
-from robovla_runtime.environments.toy_joint import ToyJoint
+from robovla_runtime.environments import EnvironmentAdapter, make_toy_environment
 from robovla_runtime.execution.action_buffer import ActionBuffer
 from robovla_runtime.execution.executor import Executor
 from robovla_runtime.metrics.summary import summarize
@@ -67,29 +67,82 @@ class SimulationResult:
         return asdict(self.config)
 
 
+def _prepare_environment(
+    config: RuntimeConfig,
+    backend: PolicyBackend | AsyncPolicyBackend,
+    environment: EnvironmentAdapter | None,
+    episode_id: str,
+) -> EnvironmentAdapter:
+    if environment is None:
+        spec = ActionSpec(
+            len(config.initial_position), config.period_s, unit=config.action_unit
+        )
+        environment = make_toy_environment(
+            config.initial_position, config.target_position, config.max_velocity, spec
+        )
+    spec = environment.action_spec
+    spec.require_time_aligned_execution()
+    if (
+        backend.action_spec != spec
+        or spec.period_s != config.period_s
+        or spec.unit != config.action_unit
+    ):
+        raise ValueError(
+            "backend/environment ActionSpec does not match runtime configuration"
+        )
+    if not callable(getattr(backend, "reset", None)):
+        raise TypeError("backend must implement reset(episode_id), even if stateless")
+    environment.reset(episode_id)
+    backend.reset(episode_id)
+    return environment
+
+
+def _observation_source(
+    environment: EnvironmentAdapter,
+    action_buffer: ActionBuffer,
+    payload_factory: Callable[[EnvironmentAdapter], object] | None,
+) -> Callable[[float], Observation]:
+    observation_id = 0
+
+    def capture(timestamp: float) -> Observation:
+        nonlocal observation_id
+        observation = environment.observe(observation_id, timestamp)
+        if (
+            observation.episode_id != action_buffer.episode_id
+            or observation.observation_id != observation_id
+        ):
+            raise ValueError("environment returned an observation with incorrect identity")
+        if payload_factory is not None:
+            observation = replace(observation, payload=payload_factory(environment))
+        observation = replace(
+            observation, episode_generation=action_buffer.episode_generation
+        )
+        observation_id += 1
+        return observation
+
+    return capture
+
+
 def run_runtime(
     config: RuntimeConfig,
     backend: PolicyBackend,
     *,
-    observation_payload_factory=None,
+    environment: EnvironmentAdapter | None = None,
+    observation_payload_factory: Callable[[EnvironmentAdapter], object] | None = None,
 ) -> SimulationResult:
     if config.scheduler == "worker_async":
         raise ValueError("worker_async requires run_realtime_runtime")
     clock = VirtualClock()
     log = EventLog()
     episode_id = f"episode-seed-{config.seed}"
-    action_spec = ActionSpec(
-        dimension=len(config.initial_position),
-        period_s=config.period_s,
-        representation="absolute_position",
-        unit=config.action_unit,
+    environment = _prepare_environment(
+        config, backend, environment, episode_id
     )
-    environment = ToyJoint(
-        config.initial_position, config.target_position, config.max_velocity
+    action_spec = environment.action_spec
+    action_buffer = ActionBuffer(
+        episode_id, config.execute_horizon, action_spec=action_spec
     )
-    if backend.action_spec != action_spec:
-        raise ValueError("backend ActionSpec does not match runtime configuration")
-    action_buffer = ActionBuffer(episode_id, config.execute_horizon)
+    action_buffer.reset(episode_id)
     executor = Executor(
         action_spec, environment, log, config.deadline_tolerance_s
     )
@@ -100,24 +153,9 @@ def run_runtime(
             backend, log, config.prefetch_threshold_s
         )
 
-    observation_id = 0
-
-    def capture(timestamp: float) -> Observation:
-        nonlocal observation_id
-        payload = (
-            observation_payload_factory(environment)
-            if observation_payload_factory is not None
-            else None
-        )
-        observation = Observation(
-            episode_id,
-            observation_id,
-            timestamp,
-            environment.state,
-            payload,
-        )
-        observation_id += 1
-        return observation
+    capture = _observation_source(
+        environment, action_buffer, observation_payload_factory
+    )
 
     log.emit(clock.now(), "episode_started", episode_id=episode_id)
     tick_count = math_ceil_ratio(config.duration_s, config.period_s)
@@ -126,19 +164,21 @@ def run_runtime(
         scheduler.tick(now, action_buffer, capture)
         executor.tick(tick_id, now, now, action_buffer)
         clock.advance_by(config.period_s)
+    environment_metrics = environment.metrics()
     log.emit(
         clock.now(),
         "episode_finished",
         episode_id=episode_id,
         final_state=list(environment.state),
-        final_tracking_error=environment.tracking_error(),
+        final_tracking_error=environment_metrics.get("final_tracking_error"),
     )
     summary = summarize(
         executor.records,
         log.events,
         config.period_s,
-        environment.tracking_error(),
+        environment_metrics.get("final_tracking_error"),
     )
+    summary["environment_metrics"] = environment_metrics
     return SimulationResult(
         config,
         tuple(executor.records),
@@ -151,7 +191,8 @@ def run_realtime_runtime(
     config: RuntimeConfig,
     backend: AsyncPolicyBackend,
     *,
-    observation_payload_factory: Callable[[ToyJoint], object] | None = None,
+    environment: EnvironmentAdapter | None = None,
+    observation_payload_factory: Callable[[EnvironmentAdapter], object] | None = None,
     timer: Callable[[], float] = time.perf_counter,
     sleeper: Callable[[float], None] = time.sleep,
     close_backend: bool = True,
@@ -159,45 +200,25 @@ def run_realtime_runtime(
     """Run a wall-clock control loop while policy inference runs on a worker."""
     if config.scheduler != "worker_async":
         raise ValueError("run_realtime_runtime requires scheduler='worker_async'")
-    action_spec = ActionSpec(
-        dimension=len(config.initial_position),
-        period_s=config.period_s,
-        representation="absolute_position",
-        unit=config.action_unit,
-    )
-    if backend.action_spec != action_spec:
-        raise ValueError("backend ActionSpec does not match runtime configuration")
-
     log = EventLog()
     episode_id = f"episode-seed-{config.seed}"
-    environment = ToyJoint(
-        config.initial_position, config.target_position, config.max_velocity
+    environment = _prepare_environment(
+        config, backend, environment, episode_id
     )
-    action_buffer = ActionBuffer(episode_id, config.execute_horizon)
+    action_spec = environment.action_spec
+    action_buffer = ActionBuffer(
+        episode_id, config.execute_horizon, action_spec=action_spec
+    )
+    action_buffer.reset(episode_id)
     executor = Executor(
         action_spec, environment, log, config.deadline_tolerance_s
     )
     scheduler = WorkerAsyncScheduler(
         backend, log, config.prefetch_threshold_s
     )
-    observation_id = 0
-
-    def capture(timestamp: float) -> Observation:
-        nonlocal observation_id
-        payload = (
-            observation_payload_factory(environment)
-            if observation_payload_factory is not None
-            else None
-        )
-        observation = Observation(
-            episode_id,
-            observation_id,
-            timestamp,
-            environment.state,
-            payload,
-        )
-        observation_id += 1
-        return observation
+    capture = _observation_source(
+        environment, action_buffer, observation_payload_factory
+    )
 
     started_at = timer()
     log.emit(0.0, "episode_started", episode_id=episode_id)
@@ -230,19 +251,21 @@ def run_realtime_runtime(
         if close_backend:
             backend.close()
 
+    environment_metrics = environment.metrics()
     log.emit(
         finished_at,
         "episode_finished",
         episode_id=episode_id,
         final_state=list(environment.state),
-        final_tracking_error=environment.tracking_error(),
+        final_tracking_error=environment_metrics.get("final_tracking_error"),
     )
     summary = summarize(
         executor.records,
         log.events,
         config.period_s,
-        environment.tracking_error(),
+        environment_metrics.get("final_tracking_error"),
     )
+    summary["environment_metrics"] = environment_metrics
     return SimulationResult(
         config,
         tuple(executor.records),

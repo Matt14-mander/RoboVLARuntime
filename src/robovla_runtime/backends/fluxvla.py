@@ -147,12 +147,20 @@ class FluxVLALiberoPreprocessor:
         self.unnorm_key = unnorm_key
         self.predict_options = dict(predict_options or {})
         self._last_episode_id: str | None = None
+        self._last_generation: int | None = None
+
+    def reset(self, episode_id: str) -> None:
+        self._last_episode_id = None
+        self._last_generation = None
 
     def __call__(self, observation: Observation) -> Mapping[str, Any]:
         if not isinstance(observation.payload, Mapping):
             raise TypeError("LIBERO preprocessing requires a mapping payload")
         raw_observation = dict(observation.payload)
-        is_new_episode = observation.episode_id != self._last_episode_id
+        is_new_episode = (
+            observation.episode_id != self._last_episode_id
+            or observation.episode_generation != self._last_generation
+        )
         raw_observation["task_description"] = self.task_description
         raw_observation["is_new_episode"] = is_new_episode
         result = self.dataset(raw_observation)
@@ -163,6 +171,7 @@ class FluxVLALiberoPreprocessor:
         batch["unnorm_key"] = self.unnorm_key
         batch.update(self.predict_options)
         self._last_episode_id = observation.episode_id
+        self._last_generation = observation.episode_generation
         return batch
 
 
@@ -188,6 +197,7 @@ class FluxVLABackend:
         inference_context: Callable[[], ContextManager[Any]] = (
             _default_inference_context
         ),
+        reset_model: Callable[[], None] | None = None,
     ) -> None:
         predict_action = getattr(vla, "predict_action", None)
         if not callable(predict_action):
@@ -206,6 +216,23 @@ class FluxVLABackend:
         self.gpu_timer = gpu_timer
         self.inference_context = inference_context
         self._next_request_id = 0
+        self._reset_model = reset_model or getattr(vla, "reset", None)
+        if self._reset_model is not None and not callable(self._reset_model):
+            raise TypeError("model reset must be callable")
+
+    def reset(self, episode_id: str) -> None:
+        """Reset preprocessing and model caches; call only from the model owner.
+
+        Models without a no-argument reset() must supply reset_model when they
+        have history. Omitting both declares the model itself stateless.
+        """
+        if not episode_id:
+            raise ValueError("episode_id must not be empty")
+        reset_preprocessor = getattr(self.preprocess, "reset", None)
+        if callable(reset_preprocessor):
+            reset_preprocessor(episode_id)
+        if self._reset_model is not None:
+            self._reset_model()
 
     @classmethod
     def from_libero_runner(
@@ -218,6 +245,7 @@ class FluxVLABackend:
         synchronize: Callable[[], None] | None = None,
         timing_mode: Literal["diagnostic", "throughput"] = "diagnostic",
         gpu_timer: GpuTimer | None = None,
+        reset_model: Callable[[], None] | None = None,
     ) -> "FluxVLABackend":
         """Create an adapter from an initialized FluxVLA LiberoEvalRunner."""
         predict_options = {}
@@ -262,6 +290,7 @@ class FluxVLABackend:
             timing_mode=timing_mode,
             gpu_timer=gpu_timer,
             inference_context=inference_context,
+            reset_model=reset_model,
         )
 
     def request(
@@ -317,6 +346,7 @@ class FluxVLABackend:
             start_at=observation.captured_at,
             spec=self.action_spec,
             actions=actions,
+            episode_generation=observation.episode_generation,
         )
         if self.timing_mode == "diagnostic":
             timing_values = [

@@ -19,6 +19,7 @@ class MockBackend:
     ) -> None:
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
+        action_spec.require_time_aligned_execution()
         if len(target) != action_spec.dimension:
             raise ValueError("target must match action dimension")
         latencies = (
@@ -33,13 +34,20 @@ class MockBackend:
         self.latencies = latencies
         self.target = target
         self._next_request_id = 0
+        self._episode_request_index = 0
+
+    def reset(self, episode_id: str) -> None:
+        if not episode_id:
+            raise ValueError("episode_id must not be empty")
+        self._episode_request_index = 0
 
     def request(
         self, observation: Observation, requested_at: float
     ) -> PendingPrediction:
         request_id = self._next_request_id
         self._next_request_id += 1
-        latency = self.latencies[request_id % len(self.latencies)]
+        latency = self.latencies[self._episode_request_index % len(self.latencies)]
+        self._episode_request_index += 1
         ready_at = requested_at + latency
         actions = tuple(
             tuple(
@@ -57,6 +65,7 @@ class MockBackend:
             start_at=observation.captured_at,
             spec=self.action_spec,
             actions=actions,
+            episode_generation=observation.episode_generation,
         )
         return PendingPrediction(request_id, requested_at, ready_at, chunk)
 

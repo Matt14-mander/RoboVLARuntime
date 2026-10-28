@@ -23,6 +23,10 @@ class PendingPrediction:
 class PolicyBackend(Protocol):
     action_spec: ActionSpec
 
+    def reset(self, episode_id: str) -> None:
+        """Clear episode history; stateless policies implement a no-op."""
+        ...
+
     def request(
         self, observation: Observation, requested_at: float
     ) -> PendingPrediction: ...

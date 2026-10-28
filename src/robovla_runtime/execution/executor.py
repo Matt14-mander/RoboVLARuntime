@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from robovla_runtime.core.events import EventLog
 from robovla_runtime.core.types import ActionSpec, ExecutionRecord
-from robovla_runtime.environments.toy_joint import ToyJoint
+from robovla_runtime.environments.base import EnvironmentAdapter
 
 from .action_buffer import ActionBuffer
 
@@ -13,12 +13,13 @@ class Executor:
     def __init__(
         self,
         action_spec: ActionSpec,
-        environment: ToyJoint,
+        environment: EnvironmentAdapter,
         event_log: EventLog,
         deadline_tolerance_s: float = 1e-9,
     ) -> None:
-        if action_spec.dimension != len(environment.state):
-            raise ValueError("action and environment dimensions differ")
+        action_spec.require_time_aligned_execution()
+        if action_spec != environment.action_spec:
+            raise ValueError("ActionSpec does not match environment")
         if deadline_tolerance_s < 0:
             raise ValueError("deadline tolerance must be non-negative")
         self.action_spec = action_spec
@@ -36,7 +37,7 @@ class Executor:
     ) -> ExecutionRecord:
         buffered = action_buffer.pop(executed_at)
         if buffered is None:
-            command = self.environment.state
+            command = self.environment.fallback_command("buffer_empty")
             record = ExecutionRecord(
                 tick_id,
                 scheduled_at,
@@ -63,7 +64,9 @@ class Executor:
                 None,
             )
             event_type = "action_executed"
-        state = self.environment.step(command, self.action_spec.period_s)
+        self.action_spec.validate_command(command)
+        self.environment.apply_action(command)
+        state = self.environment.advance(self.action_spec.period_s)
         self.records.append(record)
         self.event_log.emit(
             executed_at,

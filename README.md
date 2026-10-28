@@ -8,6 +8,12 @@ summary metrics. Phase two adds a dependency-injected `FluxVLABackend` and a
 worker-backed real-time loop so GPU inference can overlap control execution;
 real checkpoint and LIBERO validation remain pending.
 
+Runtime and Executor now accept an `EnvironmentAdapter`, with ToyJoint as the
+default implementation. Action contracts explicitly describe representation,
+frame, units, normalization, and gripper semantics. Execution currently supports
+absolute joint positions only. Episode reset propagates through the environment,
+buffer, worker, preprocessing, and model reset hooks, including reused episode IDs.
+
 ## Quick start
 
 Python 3.11 or newer is required. The phase-one runtime has no third-party
@@ -44,3 +50,4 @@ they are not VLA task-success or real-robot performance claims.
 - [第一阶段基线结果](results/phase1_matrix.md)
 - [第二阶段 FluxVLABackend 接入说明](docs/PHASE2_FLUXVLA_BACKEND.md)
 - [FluxVLA Profiler 使用与计时语义](docs/FLUXVLA_PROFILER.md)
+- [环境适配、动作契约与 reset](docs/ENVIRONMENT_ADAPTER.md)

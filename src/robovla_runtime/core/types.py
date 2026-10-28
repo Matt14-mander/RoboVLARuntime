@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -13,6 +14,7 @@ class Observation:
     captured_at: float
     state: tuple[float, ...]
     payload: object | None = None
+    episode_generation: int = 0
 
     def __post_init__(self) -> None:
         if not self.episode_id:
@@ -23,24 +25,73 @@ class Observation:
             raise ValueError("captured_at must be non-negative")
         if not self.state:
             raise ValueError("state must not be empty")
+        if self.episode_generation < 0:
+            raise ValueError("episode_generation must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)
 class ActionSpec:
     dimension: int
     period_s: float
-    representation: Literal["absolute_position"] = "absolute_position"
+    representation: Literal[
+        "absolute_position", "relative_position", "delta_position", "velocity"
+    ] = "absolute_position"
     unit: str = "normalized"
+    action_space: Literal["joint", "cartesian"] = "joint"
+    coordinate_frame: str = "joint"
+    rotation_representation: Literal[
+        "none", "axis_angle", "quaternion_xyzw", "quaternion_wxyz", "euler_xyz"
+    ] = "none"
+    normalization: Literal["normalized", "unnormalized", "unspecified"] = "unspecified"
+    component_units: tuple[str, ...] = ()
+    gripper_semantics: str = "none"
 
     def __post_init__(self) -> None:
         if self.dimension <= 0:
             raise ValueError("dimension must be positive")
-        if self.period_s <= 0:
+        if not math.isfinite(self.period_s) or self.period_s <= 0:
             raise ValueError("period_s must be positive")
-        if self.representation != "absolute_position":
-            raise ValueError("phase 1 only supports absolute_position actions")
+        if self.representation not in {
+            "absolute_position", "relative_position", "delta_position", "velocity"
+        }:
+            raise ValueError("unknown action representation")
         if not self.unit:
             raise ValueError("unit must not be empty")
+        if self.action_space not in {"joint", "cartesian"}:
+            raise ValueError("unknown action space")
+        if not self.coordinate_frame or not self.gripper_semantics:
+            raise ValueError("coordinate_frame and gripper_semantics are required")
+        if self.rotation_representation not in {
+            "none", "axis_angle", "quaternion_xyzw", "quaternion_wxyz", "euler_xyz"
+        }:
+            raise ValueError("unknown rotation representation")
+        if self.normalization not in {"normalized", "unnormalized", "unspecified"}:
+            raise ValueError("unknown normalization state")
+        if self.component_units and (
+            len(self.component_units) != self.dimension
+            or any(not unit for unit in self.component_units)
+        ):
+            raise ValueError("component_units must describe every action component")
+
+    def require_time_aligned_execution(self) -> None:
+        """Describing actions does not imply support for skipping their prefix."""
+        if (
+            self.action_space != "joint"
+            or self.representation != "absolute_position"
+            or self.coordinate_frame != "joint"
+            or self.rotation_representation != "none"
+            or self.gripper_semantics != "none"
+        ):
+            raise ValueError(
+                "ActionSpec is unsupported by time-aligned execution; "
+                "only absolute joint positions without gripper channels are supported"
+            )
+
+    def validate_command(self, command: tuple[float, ...]) -> None:
+        if len(command) != self.dimension:
+            raise ValueError("command must match ActionSpec.dimension")
+        if any(not math.isfinite(value) for value in command):
+            raise ValueError("action values must be finite")
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +104,7 @@ class ActionChunk:
     start_at: float
     spec: ActionSpec
     actions: tuple[tuple[float, ...], ...]
+    episode_generation: int = 0
 
     def __post_init__(self) -> None:
         if not self.episode_id:
@@ -67,6 +119,10 @@ class ActionChunk:
             raise ValueError("an action chunk must contain at least one action")
         if any(len(action) != self.spec.dimension for action in self.actions):
             raise ValueError("every action must match ActionSpec.dimension")
+        for action in self.actions:
+            self.spec.validate_command(action)
+        if self.episode_generation < 0:
+            raise ValueError("episode_generation must be non-negative")
 
     @property
     def end_at(self) -> float:
