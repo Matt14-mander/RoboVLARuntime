@@ -1,0 +1,68 @@
+{
+  "scope": "actual subprocess CLI with simulated FluxVLA; inference only, no robot/GPU",
+  "python": "3.12.3",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "rows": [
+    {
+      "scenario": "healthy",
+      "exit_code": 0,
+      "succeeded_samples": 2,
+      "attempts": 2,
+      "failed_attempts": 0,
+      "restarts": 0,
+      "warmups_completed": 1,
+      "terminations": 1,
+      "artifacts": "E:\\Project Learning\\具身智能\\RoboVLARuntime\\runs\\fluxvla_cli_verified\\healthy\\20261028T063632.770382Z-fluxvla-process"
+    },
+    {
+      "scenario": "inference_hang",
+      "exit_code": 0,
+      "succeeded_samples": 2,
+      "attempts": 3,
+      "failed_attempts": 1,
+      "restarts": 1,
+      "warmups_completed": 2,
+      "terminations": 2,
+      "artifacts": "E:\\Project Learning\\具身智能\\RoboVLARuntime\\runs\\fluxvla_cli_verified\\inference_hang\\20261028T063633.429080Z-fluxvla-process"
+    },
+    {
+      "scenario": "warmup_error",
+      "exit_code": 0,
+      "succeeded_samples": 2,
+      "attempts": 3,
+      "failed_attempts": 1,
+      "restarts": 1,
+      "warmups_completed": 1,
+      "terminations": 2,
+      "artifacts": "E:\\Project Learning\\具身智能\\RoboVLARuntime\\runs\\fluxvla_cli_verified\\warmup_error\\20261028T063634.560959Z-fluxvla-process"
+    },
+    {
+      "scenario": "warmup_hang",
+      "exit_code": 0,
+      "succeeded_samples": 2,
+      "attempts": 3,
+      "failed_attempts": 1,
+      "restarts": 1,
+      "warmups_completed": 1,
+      "terminations": 2,
+      "artifacts": "E:\\Project Learning\\具身智能\\RoboVLARuntime\\runs\\fluxvla_cli_verified\\warmup_hang\\20261028T063635.442691Z-fluxvla-process"
+    },
+    {
+      "scenario": "restart_exhausted",
+      "exit_code": 1,
+      "succeeded_samples": 0,
+      "attempts": 2,
+      "failed_attempts": 2,
+      "restarts": 1,
+      "warmups_completed": 2,
+      "terminations": 2,
+      "artifacts": "E:\\Project Learning\\具身智能\\RoboVLARuntime\\runs\\fluxvla_cli_verified\\restart_exhausted\\20261028T063638.116788Z-fluxvla-process"
+    },
+    {
+      "scenario": "invalid_config",
+      "exit_code": 2,
+      "validation_before_spawn": true,
+      "artifacts": null
+    }
+  ]
+}

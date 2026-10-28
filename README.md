@@ -59,6 +59,8 @@ they are not VLA task-success or real-robot performance claims.
 - [进程恢复模拟验证结果](results/process_recovery.md)
 - [FluxVLA 进程工厂、预热与状态重置](docs/FLUXVLA_PROCESS.md)
 - [FluxVLA 模拟完整链路验证](results/fluxvla_process.md)
+- [FluxVLA 离线进程推理 CLI](docs/FLUXVLA_CLI.md)
+- [FluxVLA CLI 模拟验证结果](results/fluxvla_cli.md)
 
 Synthetic adaptive-prefetch experiments (virtual time):
 
@@ -96,3 +98,16 @@ before ready. Validate the complete adapter path with simulated dependencies:
 ```powershell
 python -m benchmarks.run_fluxvla_process --output-dir runs/fluxvla_process_rerun
 ```
+
+Validate and infer offline JSON observations through the process CLI (this
+example injects one simulated inference hang and verifies recovery):
+
+```powershell
+python -m robovla_runtime.cli infer-fluxvla-process --config configs/fluxvla_offline_mock.toml --validate-only
+python -m robovla_runtime.cli infer-fluxvla-process --config configs/fluxvla_offline_mock.toml --output-root runs/offline
+```
+
+This command saves predictions and lifecycle diagnostics without executing robot
+actions. Numeric NPY/NPZ payloads are also supported with the optional `offline`
+dependency extra. Real models use `model.kind="fluxvla"` and verified model/input
+paths; static validation does not load the model or check CUDA.

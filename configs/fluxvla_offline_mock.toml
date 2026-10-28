@@ -1,0 +1,34 @@
+version = 1
+
+[action]
+dimension = 2
+period_s = 0.02
+representation = "absolute_position"
+unit = "normalized"
+action_space = "joint"
+coordinate_frame = "joint"
+
+[model]
+kind = "mock"
+task_description = "move the simulated joints"
+warmup_steps = 2
+timing_mode = "diagnostic"
+num_inference_steps = 4
+inference_seed = 11
+fault_plan = ["request_hang"]
+
+[observations]
+manifest = "../samples/fluxvla_offline_mock.json"
+required_payload_keys = ["camera"]
+
+[process]
+startup_timeout_s = 5.0
+execution_timeout_s = 0.2
+terminate_grace_s = 0.1
+max_restarts = 2
+
+[inference]
+repeats = 1
+max_attempts_per_sample = 2
+poll_interval_s = 0.005
+close_timeout_s = 2.0

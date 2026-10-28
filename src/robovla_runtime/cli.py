@@ -1,9 +1,10 @@
-"""Command-line interface for deterministic runtime experiments."""
+"""Command-line entry points for runtime experiments and offline inference."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tomllib
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -58,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
     worker.add_argument("--config", required=True)
     worker.add_argument("--output-root", default="runs")
     worker.add_argument("--latency-trace")
+    offline = subparsers.add_parser("infer-fluxvla-process", help="infer offline observations with an isolated FluxVLA process")
+    offline.add_argument("--config", required=True, help="versioned offline inference TOML")
+    offline.add_argument("--output-root", default="runs")
+    offline.add_argument("--validate-only", action="store_true", help="validate config and observations without starting a model")
+    offline.add_argument("--quiet", action="store_true", help="print final summary only; retain all diagnostic files")
     profile = subparsers.add_parser(
         "profile-fluxvla", help="profile FluxVLA on one valid LIBERO observation"
     )
@@ -83,6 +89,29 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     # read TOML config, run simulation, write results to disk, and print summary
     args = build_parser().parse_args(argv)
+    if args.command == "infer-fluxvla-process":
+        from robovla_runtime.integrations.fluxvla_cli_config import load_inference_config
+        from robovla_runtime.integrations.offline_inference import run_offline_inference
+
+        try:
+            config, observations, provenance = load_inference_config(args.config)
+        except (OSError, ValueError, TypeError, OverflowError) as error:
+            print(json.dumps({"error": "validation_failed", "message": str(error)}, ensure_ascii=False), file=sys.stderr)
+            return 2
+        if args.validate_only:
+            print(json.dumps({"validation": "passed", "model_kind": config.model["kind"],
+                              "scope": "config_and_observation_files", "model_loaded": False,
+                              "samples": len(observations.samples), "files": provenance}, ensure_ascii=False))
+            return 0
+        try:
+            code, directory, summary = run_offline_inference(
+                config, observations, provenance, args.output_root, emit=None if args.quiet else print,
+            )
+        except OSError as error:
+            print(json.dumps({"error": "artifact_io_failed", "message": str(error)}, ensure_ascii=False), file=sys.stderr)
+            return 1
+        print(json.dumps({"summary": summary, "artifacts": str(directory)}, ensure_ascii=False))
+        return code
     if args.command in {"run", "run-worker-mock"}:
         config = load_config(args.config)
         trace = LatencyTrace.read(args.latency_trace) if args.latency_trace else None

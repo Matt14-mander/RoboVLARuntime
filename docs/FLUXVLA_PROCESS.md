@@ -1,5 +1,7 @@
 # FluxVLA 进程工厂、启动预热与重启重置
 
+第六轮新增 [离线进程推理 CLI](FLUXVLA_CLI.md)，提供 TOML 配置校验、JSON/NPY/NPZ 观测加载及启动/预热/推理/重启诊断，可直接使用 `infer-fluxvla-process` 验证推理链路。
+
 第五轮将已有 FluxVLA 推理适配器接入进程后端。模型加载、runner setup、预处理、预热和正式推理都在子进程中进行。父进程仅持有可序列化的构建配置，不初始化 PyTorch、CUDA 或模型实例。
 
 ## 本轮可运行的验证
