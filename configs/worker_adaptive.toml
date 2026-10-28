@@ -1,0 +1,17 @@
+[runtime]
+scheduler = "worker_async"
+worker_prefetch = "adaptive"
+period_s = 0.02
+duration_s = 2.0
+chunk_size = 20
+execute_horizon = 20
+latency_s = [0.03, 0.03, 0.20, 0.03]
+prefetch_threshold_s = 0.08
+adaptive_window_size = 20
+adaptive_quantile = 0.95
+adaptive_margin_s = 0.02
+adaptive_hysteresis_s = 0.01
+adaptive_min_request_interval_s = 0.02
+request_timeout_s = 0.12
+worker_close_timeout_s = 0.10
+seed = 7

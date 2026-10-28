@@ -5,6 +5,7 @@ from .runtime import (
     RuntimeConfig,
     SimulationResult,
     run_realtime_runtime,
+    run_realtime_mock,
     run_runtime,
     run_simulation,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "RuntimeConfig",
     "SimulationResult",
     "run_realtime_runtime",
+    "run_realtime_mock",
     "run_runtime",
     "run_simulation",
 ]

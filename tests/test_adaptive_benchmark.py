@@ -10,6 +10,20 @@ from robovla_runtime.runtime import RuntimeConfig, run_simulation
 
 
 class AdaptiveBenchmarkTests(unittest.TestCase):
+    def test_virtual_comparison_preserves_all_previously_recorded_values(self):
+        root = Path(__file__).resolve().parents[1]
+        expected = json.loads((root / "results/adaptive_matrix.json").read_text())["rows"]
+        actual = [run[3] for run in run_comparison()]
+        self.assertEqual(len(expected), len(actual))
+        def compare_recorded(left, right):
+            if isinstance(left, dict):
+                for key, value in left.items():
+                    compare_recorded(value, right[key])
+            else:
+                self.assertEqual(left, right)
+        for left, right in zip(expected, actual):
+            compare_recorded(left, right)
+
     def test_pairs_share_input_and_configuration_except_scheduler(self):
         runs = run_comparison(duration_s=4.0)
         self.assertEqual(len(runs), 12)

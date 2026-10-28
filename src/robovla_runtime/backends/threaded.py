@@ -132,6 +132,14 @@ class ThreadedPolicyBackend:
             self._results.clear()
             return results
 
+    def cancel_queued(self, request_id: int) -> bool:
+        """Cancel only a not-yet-started request; never interrupt model state."""
+        with self._condition:
+            if self._queued is not None and self._queued.request_id == request_id:
+                self._queued = None
+                return True
+            return False
+
     def cancel_episode(self, episode_id: str) -> tuple[int, ...]:
         """Drop queued/results and suppress an in-flight result for an episode."""
         with self._condition:

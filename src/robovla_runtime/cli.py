@@ -20,7 +20,7 @@ from robovla_runtime.profiling import (
     profile_backend,
     write_profile,
 )
-from robovla_runtime.runtime import RuntimeConfig, run_simulation
+from robovla_runtime.runtime import RuntimeConfig, run_simulation, run_realtime_mock
 
 
 def load_config(path: str | Path) -> RuntimeConfig:
@@ -54,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--latency-trace", help="time-indexed synthetic latency JSON; overrides latency_s"
     )
+    worker = subparsers.add_parser("run-worker-mock", help="run wall-clock sleeping mock inference")
+    worker.add_argument("--config", required=True)
+    worker.add_argument("--output-root", default="runs")
+    worker.add_argument("--latency-trace")
     profile = subparsers.add_parser(
         "profile-fluxvla", help="profile FluxVLA on one valid LIBERO observation"
     )
@@ -79,10 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     # read TOML config, run simulation, write results to disk, and print summary
     args = build_parser().parse_args(argv)
-    if args.command == "run":
+    if args.command in {"run", "run-worker-mock"}:
         config = load_config(args.config)
         trace = LatencyTrace.read(args.latency_trace) if args.latency_trace else None
-        result = run_simulation(config, latency_trace=trace)
+        runner = run_simulation if args.command == "run" else run_realtime_mock
+        result = runner(config, latency_trace=trace)
         run_dir = write_result(result, args.output_root)
         if trace is not None:
             trace.write(run_dir / "latency_trace.json")

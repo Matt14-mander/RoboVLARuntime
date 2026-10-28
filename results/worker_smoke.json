@@ -1,0 +1,158 @@
+{
+  "base_config": {
+    "action_unit": "normalized",
+    "adaptive_hysteresis_s": 0.01,
+    "adaptive_margin_s": 0.02,
+    "adaptive_min_request_interval_s": 0.01,
+    "adaptive_quantile": 0.95,
+    "adaptive_window_size": 20,
+    "chunk_size": 30,
+    "deadline_tolerance_s": 0.001,
+    "duration_s": 0.6,
+    "execute_horizon": 30,
+    "initial_position": [
+      0.0
+    ],
+    "latency_s": [
+      0.05
+    ],
+    "max_velocity": 2.0,
+    "period_s": 0.01,
+    "prefetch_threshold_s": 0.08,
+    "request_timeout_s": 0.06,
+    "scheduler": "worker_async",
+    "seed": 7,
+    "target_position": [
+      1.0
+    ],
+    "worker_close_timeout_s": 0.1,
+    "worker_prefetch": "fixed"
+  },
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python_version": "3.12.3",
+  "rows": [
+    {
+      "artifacts": "runs/worker_smoke/fixed/fixed/20261028T043206.548564Z-worker_async",
+      "control_lateness_p95_s": 0.0006744400173193221,
+      "fallback_ticks": 10,
+      "late_results": 0,
+      "latency_samples": 0,
+      "prefetch": "fixed",
+      "requests": 6,
+      "scenario": "fixed",
+      "shutdown_timeouts": 0,
+      "ticks": 60,
+      "timeouts": 0
+    },
+    {
+      "artifacts": "runs/worker_smoke/fixed/adaptive/20261028T043207.148801Z-worker_async",
+      "control_lateness_p95_s": 0.0006427100162836485,
+      "fallback_ticks": 7,
+      "late_results": 0,
+      "latency_samples": 3,
+      "prefetch": "adaptive",
+      "requests": 3,
+      "scenario": "fixed",
+      "shutdown_timeouts": 0,
+      "ticks": 60,
+      "timeouts": 0
+    },
+    {
+      "artifacts": "runs/worker_smoke/spike/fixed/20261028T043207.742194Z-worker_async",
+      "control_lateness_p95_s": 0.0006300450001726271,
+      "fallback_ticks": 16,
+      "late_results": 1,
+      "latency_samples": 0,
+      "prefetch": "fixed",
+      "requests": 16,
+      "scenario": "spike",
+      "shutdown_timeouts": 0,
+      "ticks": 60,
+      "timeouts": 1
+    },
+    {
+      "artifacts": "runs/worker_smoke/spike/adaptive/20261028T043208.337441Z-worker_async",
+      "control_lateness_p95_s": 0.0006452999825123484,
+      "fallback_ticks": 18,
+      "late_results": 2,
+      "latency_samples": 5,
+      "prefetch": "adaptive",
+      "requests": 5,
+      "scenario": "spike",
+      "shutdown_timeouts": 0,
+      "ticks": 60,
+      "timeouts": 2
+    },
+    {
+      "artifacts": "runs/worker_smoke/overload/fixed/20261028T043208.945315Z-worker_async",
+      "control_lateness_p95_s": 0.0007708549966337074,
+      "fallback_ticks": 60,
+      "late_results": 3,
+      "latency_samples": 0,
+      "prefetch": "fixed",
+      "requests": 60,
+      "scenario": "overload",
+      "shutdown_timeouts": 0,
+      "ticks": 60,
+      "timeouts": 4
+    },
+    {
+      "artifacts": "runs/worker_smoke/overload/adaptive/20261028T043209.553514Z-worker_async",
+      "control_lateness_p95_s": 0.0005996000044397237,
+      "fallback_ticks": 60,
+      "late_results": 3,
+      "latency_samples": 3,
+      "prefetch": "adaptive",
+      "requests": 10,
+      "scenario": "overload",
+      "shutdown_timeouts": 0,
+      "ticks": 60,
+      "timeouts": 9
+    }
+  ],
+  "scope": "wall-clock sleeping mock; OS-dependent smoke check, no GPU or VLA",
+  "traces": {
+    "fixed": {
+      "interval_s": 0.1,
+      "label": "fixed",
+      "latencies_s": [
+        0.015,
+        0.015,
+        0.015,
+        0.015,
+        0.015,
+        0.015
+      ],
+      "schema_version": 1,
+      "seed": null
+    },
+    "overload": {
+      "interval_s": 0.1,
+      "label": "overload",
+      "latencies_s": [
+        0.15,
+        0.15,
+        0.15,
+        0.15,
+        0.15,
+        0.15
+      ],
+      "schema_version": 1,
+      "seed": null
+    },
+    "spike": {
+      "interval_s": 0.1,
+      "label": "spike",
+      "latencies_s": [
+        0.015,
+        0.015,
+        0.12,
+        0.015,
+        0.015,
+        0.015
+      ],
+      "schema_version": 1,
+      "seed": null
+    }
+  }
+}

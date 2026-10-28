@@ -165,6 +165,11 @@ observation 时，会原子替换等待请求，避免按 FIFO 累积陈旧 obse
 如果需要跨多个 episode 复用 worker，可传 `close_backend=False` 并由调用方最终调用
 `backend.close()`。
 
+墙钟循环可通过 `worker_prefetch="adaptive"` 启用共享的自适应估计器。
+`request_timeout_s` 限制提交到结果取回的耗时，`worker_close_timeout_s` 限制结束时
+等待 worker 的时间；迟到结果不会进入 buffer。默认固定预取保持原 mailbox 行为。
+详细语义和模拟验证见 [Worker 自适应与超时](WORKER_ADAPTIVE.md)。
+
 线程方案让 CUDA 推理与 CPU 控制循环重叠，并避免跨进程复制模型。Python 预处理
 仍可能与控制线程竞争 GIL；若后续画像表明预处理成为主要瓶颈，再将纯 CPU 图像处理
 拆到进程池。

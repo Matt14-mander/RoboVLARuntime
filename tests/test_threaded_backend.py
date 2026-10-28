@@ -56,6 +56,24 @@ def collect_results(backend, count: int, timeout_s: float = 1.0):
 
 
 class ThreadedPolicyBackendTests(unittest.TestCase):
+    def test_cancel_queued_does_not_interrupt_inflight_model(self):
+        gate = Event()
+        blocking = GateBackend(gate)
+        backend = ThreadedPolicyBackend(blocking)
+        try:
+            first = backend.submit(Observation("ep", 0, 0.0, (0.0,)), 0.0)
+            self.assertTrue(blocking.started.wait(0.5))
+            queued = backend.submit(Observation("ep", 1, 0.01, (0.0,)), 0.01)
+            self.assertFalse(backend.cancel_queued(first.request_id))
+            self.assertTrue(backend.cancel_queued(queued.request_id))
+            gate.set()
+            results = collect_results(backend, 1)
+            self.assertEqual([result.request_id for result in results], [first.request_id])
+            self.assertEqual(blocking.observation_ids, [0])
+        finally:
+            gate.set()
+            self.assertTrue(backend.close(1.0))
+
     def test_reset_is_serialized_after_inflight_request_and_clears_model_history(self):
         gate = Event()
 

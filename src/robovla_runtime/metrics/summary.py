@@ -74,6 +74,15 @@ def summarize(
         "ticks": len(records),
         "prediction_count": len(latencies),
         "prediction_failure_count": prediction_failures,
+        "prediction_timeout_count": sum(event.type == "prediction_timed_out" for event in events),
+        "late_result_count": sum(
+            event.type == "prediction_discarded" and event.data["reason"] == "request_timeout"
+            for event in events
+        ),
+        "discarded_result_count": sum(event.type == "prediction_discarded" for event in events),
+        "worker_shutdown_timeout_count": sum(
+            event.type == "worker_shutdown_timeout" for event in events
+        ),
         "prediction_request_count": sum(
             event.type in {"prediction_requested", "prediction_submitted"}
             for event in events
@@ -81,6 +90,9 @@ def summarize(
         "chunk_rejection_counts": rejected,
         "adaptive_prefetch": {
             "completed_samples": len(estimates),
+            "late_completion_samples": sum(
+                event.data.get("sample_kind") == "late_completion" for event in estimates
+            ),
             "final_threshold_s": estimates[-1].data["threshold_s"] if estimates else None,
             "max_threshold_s": max(
                 (float(event.data["threshold_s"]) for event in estimates), default=None

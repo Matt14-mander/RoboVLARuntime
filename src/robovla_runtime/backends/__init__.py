@@ -6,6 +6,7 @@ from .fluxvla import (
     make_libero_action_decoder,
 )
 from .mock import MockBackend
+from .sleeping_mock import SleepingMockBackend
 from .latency import LatencyTrace, make_latency_trace
 from .threaded import (
     AsyncPolicyBackend,
@@ -19,6 +20,7 @@ __all__ = [
     "FluxVLALiberoPreprocessor",
     "AsyncPolicyBackend",
     "MockBackend",
+    "SleepingMockBackend",
     "LatencyTrace",
     "make_latency_trace",
     "PendingPrediction",

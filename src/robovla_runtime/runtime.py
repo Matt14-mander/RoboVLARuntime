@@ -10,7 +10,8 @@ from dataclasses import asdict, dataclass, replace
 from robovla_runtime.backends.base import PolicyBackend
 from robovla_runtime.backends.mock import MockBackend
 from robovla_runtime.backends.latency import LatencyTrace
-from robovla_runtime.backends.threaded import AsyncPolicyBackend
+from robovla_runtime.backends.sleeping_mock import SleepingMockBackend
+from robovla_runtime.backends.threaded import AsyncPolicyBackend, ThreadedPolicyBackend
 from robovla_runtime.core.clock import VirtualClock
 from robovla_runtime.core.events import Event, EventLog
 from robovla_runtime.core.types import ActionSpec, ExecutionRecord, Observation
@@ -47,6 +48,9 @@ class RuntimeConfig:
     adaptive_margin_s: float = 0.02
     adaptive_hysteresis_s: float = 0.01
     adaptive_min_request_interval_s: float = 0.02
+    worker_prefetch: str = "fixed"
+    request_timeout_s: float = 0.5
+    worker_close_timeout_s: float = 0.1
 
     def adaptive_config(self) -> AdaptivePrefetchConfig:
         return AdaptivePrefetchConfig(
@@ -61,6 +65,12 @@ class RuntimeConfig:
                 "scheduler must be sync, fixed_async, adaptive_async, or worker_async"
             )
         self.adaptive_config()
+        if self.worker_prefetch not in {"fixed", "adaptive"}:
+            raise ValueError("worker_prefetch must be fixed or adaptive")
+        if not math.isfinite(self.request_timeout_s) or self.request_timeout_s <= 0:
+            raise ValueError("request_timeout_s must be finite and positive")
+        if not math.isfinite(self.worker_close_timeout_s) or self.worker_close_timeout_s < 0:
+            raise ValueError("worker_close_timeout_s must be finite and non-negative")
         if any(not math.isfinite(value) or value < 0 for value in (
             self.period_s, self.duration_s, self.prefetch_threshold_s,
         )):
@@ -246,7 +256,11 @@ def run_realtime_runtime(
         action_spec, environment, log, config.deadline_tolerance_s
     )
     scheduler = WorkerAsyncScheduler(
-        backend, log, config.prefetch_threshold_s
+        backend, log, config.prefetch_threshold_s,
+        request_timeout_s=config.request_timeout_s,
+        adaptive_config=config.adaptive_config() if config.worker_prefetch == "adaptive" else None,
+        coverage_budget_s=config.execute_horizon * action_spec.period_s,
+        clock=lambda: max(0.0, timer() - started_at),
     )
     capture = _observation_source(
         environment, action_buffer, observation_payload_factory
@@ -271,17 +285,20 @@ def run_realtime_runtime(
             )
     finally:
         finished_at = max(0.0, timer() - started_at)
-        scheduler.poll(finished_at, action_buffer)
-        dropped = backend.cancel_episode(episode_id)
-        for request_id in dropped:
-            log.emit(
-                finished_at,
-                "prediction_cancelled",
-                request_id=request_id,
-                episode_id=episode_id,
-            )
-        if close_backend:
-            backend.close()
+        try:
+            scheduler.poll(finished_at, action_buffer)
+        finally:
+            try:
+                scheduler.cancel_episode(max(0.0, timer() - started_at), episode_id)
+            finally:
+                if close_backend:
+                    closed = backend.close(timeout_s=config.worker_close_timeout_s)
+                    if not closed:
+                        log.emit(
+                            max(0.0, timer() - started_at), "worker_shutdown_timeout",
+                            timeout_s=config.worker_close_timeout_s,
+                        )
+        finished_at = max(0.0, timer() - started_at)
 
     environment_metrics = environment.metrics()
     log.emit(
@@ -324,6 +341,26 @@ def run_simulation(
         latency_trace=latency_trace,
     )
     return run_runtime(config, backend)
+
+
+def run_realtime_mock(
+    config: RuntimeConfig, *, latency_trace: LatencyTrace | None = None
+) -> SimulationResult:
+    """Exercise the wall-clock worker path with sleeping synthetic inference."""
+    if config.scheduler != "worker_async":
+        raise ValueError("run_realtime_mock requires scheduler='worker_async'")
+    spec = ActionSpec(len(config.initial_position), config.period_s, unit=config.action_unit)
+    blocking = SleepingMockBackend(MockBackend(
+        spec, config.chunk_size, config.latency_s, config.target_position,
+        latency_trace=latency_trace,
+    ))
+    backend = ThreadedPolicyBackend(blocking)
+    try:
+        return run_realtime_runtime(config, backend)
+    finally:
+        # Also release an idle worker if setup/validation failed before the loop.
+        # The normal runtime already performed its configured bounded join.
+        backend.close(timeout_s=0.0)
 
 
 def math_ceil_ratio(numerator: float, denominator: float) -> int:

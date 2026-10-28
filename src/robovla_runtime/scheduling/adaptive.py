@@ -1,4 +1,4 @@
-"""Single-in-flight adaptive prefetch for virtual-time experiments."""
+"""Shared adaptive prefetch estimator and its virtual-time scheduler."""
 
 from __future__ import annotations
 
@@ -39,16 +39,15 @@ class AdaptivePrefetchConfig:
             raise ValueError("min_request_interval_s must be positive")
 
 
-class AdaptiveAsyncScheduler(BaseScheduler):
+class AdaptivePrefetchController:
     def __init__(
         self,
-        backend: PolicyBackend,
         event_log: EventLog,
         initial_threshold_s: float,
         coverage_budget_s: float,
         config: AdaptivePrefetchConfig,
     ) -> None:
-        super().__init__(backend, event_log)
+        self.event_log = event_log
         if not math.isfinite(initial_threshold_s) or initial_threshold_s < 0:
             raise ValueError("initial threshold must be finite and non-negative")
         if not math.isfinite(coverage_budget_s) or coverage_budget_s <= 0:
@@ -58,17 +57,23 @@ class AdaptiveAsyncScheduler(BaseScheduler):
         self.threshold_s = min(initial_threshold_s, coverage_budget_s)
         self.samples: deque[float] = deque(maxlen=config.window_size)
         self.completed_requests = 0
-        self._last_requested_at: float | None = None
         self._supply_limited = False
         self._started = False
 
-    def _collect(self, now: float, action_buffer: ActionBuffer) -> None:
-        pending = self._poll(now, action_buffer)
-        if pending is None:
-            return
+    def start(self, now: float) -> None:
+        if not self._started:
+            self._started = True
+            self.event_log.emit(
+                now, "adaptive_prefetch_started", threshold_s=self.threshold_s,
+                coverage_budget_s=self.coverage_budget_s,
+            )
+
+    def observe_completion(
+        self, now: float, request_id: int, requested_at: float, *, late: bool = False
+    ) -> None:
         # Include polling/collection delay. Never read the pending request's
         # advertised future ready_at before it has completed.
-        observed_s = max(0.0, now - pending.requested_at)
+        observed_s = max(0.0, now - requested_at)
         self.samples.append(observed_s)
         self.completed_requests += 1
         values = sorted(self.samples)
@@ -95,7 +100,8 @@ class AdaptiveAsyncScheduler(BaseScheduler):
         )
         supply_limited = shortfall_s > 1e-12
         self.event_log.emit(
-            now, "prefetch_estimate_updated", request_id=pending.request_id,
+            now, "prefetch_estimate_updated", request_id=request_id,
+            sample_kind="late_completion" if late else "completion",
             observed_latency_s=observed_s, estimated_latency_s=estimate_s,
             sample_count=len(self.samples), requested_threshold_s=requested_threshold_s,
             threshold_s=self.threshold_s, previous_threshold_s=previous_threshold_s,
@@ -110,18 +116,42 @@ class AdaptiveAsyncScheduler(BaseScheduler):
                 supply_shortfall_s=shortfall_s,
             )
 
+class AdaptiveAsyncScheduler(BaseScheduler):
+    def __init__(
+        self,
+        backend: PolicyBackend,
+        event_log: EventLog,
+        initial_threshold_s: float,
+        coverage_budget_s: float,
+        config: AdaptivePrefetchConfig,
+    ) -> None:
+        super().__init__(backend, event_log)
+        self.config = config
+        self.prefetch = AdaptivePrefetchController(
+            event_log, initial_threshold_s, coverage_budget_s, config
+        )
+        self._last_requested_at: float | None = None
+
+    @property
+    def samples(self) -> deque[float]:
+        return self.prefetch.samples
+
+    @property
+    def threshold_s(self) -> float:
+        return self.prefetch.threshold_s
+
+    def _collect(self, now: float, action_buffer: ActionBuffer) -> None:
+        pending = self._poll(now, action_buffer)
+        if pending is not None:
+            self.prefetch.observe_completion(now, pending.request_id, pending.requested_at)
+
     def tick(
         self,
         now: float,
         action_buffer: ActionBuffer,
         capture_observation: Callable[[float], Observation],
     ) -> None:
-        if not self._started:
-            self._started = True
-            self.event_log.emit(
-                now, "adaptive_prefetch_started", threshold_s=self.threshold_s,
-                coverage_budget_s=self.coverage_budget_s,
-            )
+        self.prefetch.start(now)
         self._collect(now, action_buffer)
         interval_elapsed = (
             self._last_requested_at is None

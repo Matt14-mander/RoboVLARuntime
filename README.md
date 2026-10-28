@@ -53,6 +53,8 @@ they are not VLA task-success or real-robot performance claims.
 - [环境适配、动作契约与 reset](docs/ENVIRONMENT_ADAPTER.md)
 - [自适应预取与合成延迟故障](docs/ADAPTIVE_PREFETCH.md)
 - [自适应 / 固定异步对照结果](results/adaptive_matrix.md)
+- [Worker 墙钟自适应、超时与迟到结果](docs/WORKER_ADAPTIVE.md)
+- [Worker 模拟验证结果](results/worker_smoke.md)
 
 Synthetic adaptive-prefetch experiments (virtual time):
 
@@ -65,3 +67,13 @@ python benchmarks/run_adaptive_matrix.py
 The matrix compares fixed and adaptive scheduling on shared time-indexed fixed,
 long-tail, and overload traces. It retains unfavorable cases and reports request
 counts alongside fallback and observation age; these are not real-model results.
+
+Run the wall-clock worker with simulated blocking inference:
+
+```powershell
+python -m robovla_runtime.cli run-worker-mock --config configs/worker_adaptive.toml
+python benchmarks/run_worker_smoke.py
+```
+
+Worker prefetch can be fixed or adaptive. Request deadlines reject late results,
+and shutdown waits are bounded; timing out does not forcibly terminate inference.

@@ -1,6 +1,6 @@
 # 自适应预取与合成延迟故障
 
-本轮实现位于虚拟时间 `run_runtime` / `run_simulation` 路径，选择 `scheduler="adaptive_async"`。实际线程循环继续使用 `worker_async`；本轮实验没有测量真实模型、GPU 或网络性能。
+本轮合成延迟实验位于虚拟时间 `run_runtime` / `run_simulation` 路径，选择 `scheduler="adaptive_async"`。后续已将同一个估计器接入 `worker_async` 墙钟循环，见 [Worker 自适应与超时](WORKER_ADAPTIVE.md)。这些实验没有测量真实模型、GPU 或网络性能。
 
 ## 调度规则
 

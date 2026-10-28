@@ -71,7 +71,7 @@ buffer 在接收时验证动作契约，拒绝不兼容 chunk，并保留原来�
 - `FluxVLABackend.reset()` 调用预处理器的 `reset(episode_id)`，并调用模型的无参数 `reset()`；也可以显式传入 `reset_model=callback`（工厂方法同样支持）。没有模型 reset 或 callback 意味着调用方声明模型本身无状态；有额外缓存的模型必须提供清理回调。
 - LIBERO 预处理器 reset 后，即便 episode ID 不变，下一条输入也携带 `is_new_episode=True`，使 dataset 在使用新观测前重置历史。
 
-跨 episode 复用异步后端时，传 `close_backend=False`，最后由调用方 `close()`。这次改动不强制终止正在执行的推理，也不增加 worker 超时或进程重启机制。
+跨 episode 复用异步后端时，传 `close_backend=False`，最后由调用方 `close()`。后续已加入请求 timeout 和有限 shutdown 等待，详见 [Worker 自适应与超时](WORKER_ADAPTIVE.md)。线程方案不强制终止正在执行的推理，也不提供进程重启。
 
 ## 时间语义与验证范围
 
