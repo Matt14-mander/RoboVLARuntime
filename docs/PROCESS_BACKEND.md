@@ -1,5 +1,7 @@
 # 进程隔离推理与故障恢复
 
+FluxVLA 的可序列化模型工厂、启动预热和重启后重置已在第五轮接入，见 [FluxVLA 进程启动说明](FLUXVLA_PROCESS.md)。可选 backend.startup(report) 在 ready 前执行，其进度消息不会延长启动超时；未提供该钩子的后端保持原行为。
+
 `ProcessPolicyBackend` 实现与线程后端相同的 AsyncPolicyBackend 接口，可直接交给 `run_realtime_runtime()`。控制线程仍使用 `worker_async`，支持 fixed 和 adaptive 预取。默认线程模式保持不变。
 
 ## 运行模拟后端

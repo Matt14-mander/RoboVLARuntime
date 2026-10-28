@@ -90,6 +90,14 @@ def summarize(
             "faults": sum(event.type == "process_worker_fault" for event in events),
             "restart_exhaustions": sum(event.type == "process_restart_exhausted" for event in events),
             "termination_failures": sum(event.type == "process_termination_failed" for event in events),
+            "warmups_completed": sum(
+                event.type == "process_startup_progress" and event.data.get("stage") == "warmup_completed"
+                for event in events
+            ),
+            "warmup_state_resets": sum(
+                event.type == "process_startup_progress" and event.data.get("stage") == "warmup_state_reset"
+                for event in events
+            ),
         },
         "prediction_request_count": sum(
             event.type in {"prediction_requested", "prediction_submitted"}

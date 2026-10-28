@@ -27,31 +27,22 @@ def _delete_value(config: Any, key: str) -> None:
         delattr(config, key)
 
 
-def create_libero_profile_session(
+def load_libero_runner(
     *,
     config_path: str | Path,
     checkpoint_path: str | Path,
     fluxvla_root: str | Path | None = None,
     task_suite_name: str | None = None,
-    task_id: int = 0,
-    trial_id: int = 0,
-    action_period_s: float = 0.1,
-    action_dimension: int = 7,
-    timing_mode: str = "diagnostic",
     num_inference_steps: int | None = None,
     inference_seed: int | None = None,
-) -> ProfileSession:
-    """Initialize one valid LIBERO observation without starting full eval."""
+) -> Any:
+    """Build/setup the upstream runner without creating a simulation environment."""
     config_path = Path(config_path).resolve()
     checkpoint_path = Path(checkpoint_path).resolve()
     if not config_path.is_file():
         raise FileNotFoundError(f"FluxVLA config not found: {config_path}")
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"FluxVLA checkpoint not found: {checkpoint_path}")
-    if task_id < 0 or trial_id < 0:
-        raise ValueError("task_id and trial_id must be non-negative")
-    if action_period_s <= 0 or action_dimension <= 0:
-        raise ValueError("action_period_s and action_dimension must be positive")
     if num_inference_steps is not None and num_inference_steps <= 0:
         raise ValueError("num_inference_steps must be positive")
     if fluxvla_root is not None:
@@ -63,22 +54,14 @@ def create_libero_profile_session(
             sys.path.insert(0, root_text)
 
     try:
-        import torch
         from mmengine import Config
         from fluxvla.engines import build_runner_from_cfg
-        from fluxvla.engines.runners.libero_eval_runner import (
-            _get_libero_benchmark,
-        )
-        from fluxvla.engines.utils.eval_utils import (
-            get_libero_dummy_action,
-            get_libero_env,
-        )
         from fluxvla.engines.utils.torch_utils import (
             configure_inference_attention_defaults,
         )
     except ImportError as error:
         raise RuntimeError(
-            "FluxVLA profiling dependencies are unavailable; activate the "
+            "FluxVLA runner dependencies are unavailable; activate the "
             "FluxVLA/LIBERO environment before running this command"
         ) from error
 
@@ -89,7 +72,7 @@ def create_libero_profile_session(
         eval_root.runner if hasattr(eval_root, "runner") else eval_root
     )
     if _get_value(eval_cfg, "type") != "LiberoEvalRunner":
-        raise ValueError("profile-fluxvla currently requires LiberoEvalRunner")
+        raise ValueError("FluxVLA LIBERO integration requires LiberoEvalRunner")
     for key in (
         "feishu_sheet_url",
         "feishu_app_id",
@@ -121,10 +104,49 @@ def create_libero_profile_session(
             processor.model_path = os.fspath(checkpoint_path)
 
     runner = None
-    environment = None
     try:
         runner = build_runner_from_cfg(eval_cfg)
         runner.run_setup()
+        return runner
+    except Exception:
+        cleanup_runner = getattr(runner, "cleanup", None)
+        if callable(cleanup_runner):
+            cleanup_runner()
+        raise
+
+
+def create_libero_profile_session(
+    *,
+    config_path: str | Path,
+    checkpoint_path: str | Path,
+    fluxvla_root: str | Path | None = None,
+    task_suite_name: str | None = None,
+    task_id: int = 0,
+    trial_id: int = 0,
+    action_period_s: float = 0.1,
+    action_dimension: int = 7,
+    timing_mode: str = "diagnostic",
+    num_inference_steps: int | None = None,
+    inference_seed: int | None = None,
+) -> ProfileSession:
+    """Initialize one valid LIBERO observation without starting full eval."""
+    if task_id < 0 or trial_id < 0:
+        raise ValueError("task_id and trial_id must be non-negative")
+    if action_period_s <= 0 or action_dimension <= 0:
+        raise ValueError("action_period_s and action_dimension must be positive")
+    config_path, checkpoint_path = Path(config_path).resolve(), Path(checkpoint_path).resolve()
+    runner = load_libero_runner(
+        config_path=config_path, checkpoint_path=checkpoint_path, fluxvla_root=fluxvla_root,
+        task_suite_name=task_suite_name, num_inference_steps=num_inference_steps,
+        inference_seed=inference_seed,
+    )
+    task_suite_name = runner.task_suite_name
+    environment = None
+    try:
+        import torch
+        from fluxvla.engines.runners.libero_eval_runner import _get_libero_benchmark
+        from fluxvla.engines.utils.eval_utils import get_libero_dummy_action, get_libero_env
+
         benchmark = _get_libero_benchmark()
         suite = benchmark.get_benchmark_dict()[task_suite_name]()
         if task_id >= suite.n_tasks:

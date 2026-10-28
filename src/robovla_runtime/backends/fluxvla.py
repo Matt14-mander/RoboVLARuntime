@@ -234,6 +234,10 @@ class FluxVLABackend:
         if self._reset_model is not None:
             self._reset_model()
 
+    @property
+    def has_model_reset(self) -> bool:
+        return self._reset_model is not None
+
     @classmethod
     def from_libero_runner(
         cls,

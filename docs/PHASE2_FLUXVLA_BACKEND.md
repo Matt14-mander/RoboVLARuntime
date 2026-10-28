@@ -2,6 +2,8 @@
 
 ## 当前完成范围
 
+第五轮新增 [FluxVLA 进程工厂与启动预热](FLUXVLA_PROCESS.md)：模型在子进程加载，预热及状态清理完成后才 ready；故障重启后重复构建、预热和 reset。模拟验证已覆盖整个适配链路，真实模型仍待验证。
+
 `FluxVLABackend` 已实现 FluxVLA 推理边界的适配：
 
 ```text

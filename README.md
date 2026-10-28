@@ -57,6 +57,8 @@ they are not VLA task-success or real-robot performance claims.
 - [Worker 模拟验证结果](results/worker_smoke.md)
 - [进程隔离、卡死终止与状态恢复](docs/PROCESS_BACKEND.md)
 - [进程恢复模拟验证结果](results/process_recovery.md)
+- [FluxVLA 进程工厂、预热与状态重置](docs/FLUXVLA_PROCESS.md)
+- [FluxVLA 模拟完整链路验证](results/fluxvla_process.md)
 
 Synthetic adaptive-prefetch experiments (virtual time):
 
@@ -85,4 +87,12 @@ recreate it after a timeout, with fresh model state and a bounded restart budget
 ```powershell
 python -m robovla_runtime.cli run-worker-mock --config configs/process_adaptive.toml
 python -m benchmarks.run_process_recovery --output-dir runs/process_recovery_rerun
+```
+
+FluxVLA now has serializable process factories and a startup warmup gate. Each
+restart rebuilds the model, repeats warmup, and clears model/preprocessor state
+before ready. Validate the complete adapter path with simulated dependencies:
+
+```powershell
+python -m benchmarks.run_fluxvla_process --output-dir runs/fluxvla_process_rerun
 ```

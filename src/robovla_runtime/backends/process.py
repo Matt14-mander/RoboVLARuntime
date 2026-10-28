@@ -45,11 +45,18 @@ class _Request:
 def _child_main(connection, factory_bytes: bytes, action_spec: ActionSpec) -> None:
     """Only the child constructs, resets, and calls the model."""
     try:
+        loading_started = time.perf_counter()
         backend = pickle.loads(factory_bytes)()
         if backend.action_spec != action_spec:
             raise ValueError("child backend ActionSpec differs from the parent contract")
         if not callable(getattr(backend, "reset", None)):
             raise TypeError("child backend must implement reset")
+        startup = getattr(backend, "startup", None)
+        if callable(startup):
+            def report(stage: str, **data) -> None:
+                connection.send(("startup_progress", {"stage": stage, **data}))
+            report("model_loaded", elapsed_s=time.perf_counter() - loading_started)
+            startup(report)
         connection.send(("ready", None))
         episode_key = None
         while True:
@@ -85,7 +92,11 @@ def _child_main(connection, factory_bytes: bytes, action_spec: ActionSpec) -> No
 def _transport(connection, outgoing: queue.Queue, incoming: queue.Queue) -> None:
     """Keep serialization and even partial pipe reads off the watchdog thread."""
     try:
-        incoming.put(connection.recv())
+        while True:
+            message = connection.recv()
+            incoming.put(message)
+            if message[0] != "startup_progress":
+                break
         while True:
             request = outgoing.get()
             if request is None:
@@ -289,6 +300,9 @@ class ProcessPolicyBackend:
             self._check_cancelled(epoch, active)
             if time.perf_counter() > deadline:
                 raise _Fault("ProcessExecutionTimeout" if active else "ProcessStartupTimeout", "process watchdog expired")
+            if kind == "startup_progress" and not active:
+                self._emit("process_startup_progress", **payload)
+                continue  # Progress never extends the absolute startup deadline.
             if kind in {"failure", "transport_error"}:
                 raise _Fault(payload[0], payload[1])
             return kind, payload
