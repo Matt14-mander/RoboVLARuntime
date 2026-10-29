@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import unittest
+from dataclasses import replace
 from threading import Event, get_ident
 
 from robovla_runtime.backends.base import PendingPrediction
@@ -56,6 +57,75 @@ def collect_results(backend, count: int, timeout_s: float = 1.0):
 
 
 class ThreadedPolicyBackendTests(unittest.TestCase):
+    def test_mutating_failure_requires_successful_reset_before_next_inference(self):
+        for recovery_reset_failures in (0, 2):
+            with self.subTest(recovery_reset_failures=recovery_reset_failures):
+                gate = Event()
+
+                class StatefulBackend(GateBackend):
+                    def __init__(self):
+                        super().__init__(gate)
+                        self.history = []
+                        self.calls = []
+                        self.reset_attempts = 0
+
+                    def reset(self, episode_id):
+                        self.calls.append(("reset", get_ident()))
+                        self.reset_attempts += 1
+                        if 1 < self.reset_attempts <= 1 + recovery_reset_failures:
+                            raise RuntimeError("recovery reset failed")
+                        self.history.clear()
+
+                    def request(self, observation, requested_at):
+                        self.calls.append(("request", get_ident()))
+                        self.history.append(observation.observation_id)
+                        result = super().request(observation, requested_at)
+                        if observation.observation_id == 0:
+                            raise RuntimeError("inference failed after mutating history")
+                        return replace(result, chunk=replace(
+                            result.chunk, actions=((float(len(self.history)),),),
+                        ))
+
+                blocking = StatefulBackend()
+                backend = ThreadedPolicyBackend(blocking)
+                try:
+                    failed = backend.submit(Observation("ep", 0, 0.0, (0.0,)), 0.0)
+                    self.assertTrue(blocking.started.wait(0.5))
+                    # The next request is already waiting when inference fails.
+                    queued = backend.submit(Observation("ep", 1, 0.01, (0.0,)), 0.01)
+                    self.assertEqual(blocking.reset_attempts, 1)
+                    gate.set()
+                    results = collect_results(backend, 2)
+                    self.assertEqual([r.request_id for r in results], [failed.request_id, queued.request_id])
+                    self.assertIsInstance(results[0], PredictionFailure)
+                    self.assertEqual(results[0].message, "inference failed after mutating history")
+                    recovery = results[1]
+                    for index in range(recovery_reset_failures):
+                        self.assertIsInstance(recovery, PredictionFailure)
+                        self.assertEqual(recovery.message, "recovery reset failed")
+                        # Failed resets must never enter inference with dirty state.
+                        self.assertEqual(blocking.observation_ids, [0])
+                        observation_id = index + 2
+                        receipt = backend.submit(Observation("ep", observation_id, 0.02, (0.0,)), 0.02)
+                        recovered = collect_results(backend, 1)
+                        self.assertEqual([r.request_id for r in recovered], [receipt.request_id])
+                        recovery = recovered[0]
+                    self.assertIsInstance(recovery, PendingPrediction)
+                    self.assertEqual(recovery.chunk.actions, ((1.0,),))
+                    self.assertEqual(blocking.reset_attempts, 2 + recovery_reset_failures)
+                    # Successful requests retain normal same-episode history.
+                    backend.submit(Observation("ep", 10, 0.03, (0.0,)), 0.03)
+                    healthy = collect_results(backend, 1)
+                    self.assertEqual(len(healthy), 1)
+                    self.assertEqual(healthy[0].chunk.actions, ((2.0,),))
+                    self.assertEqual(blocking.reset_attempts, 2 + recovery_reset_failures)
+                    owner_threads = {thread_id for _, thread_id in blocking.calls}
+                    self.assertEqual(len(owner_threads), 1)
+                    self.assertNotIn(get_ident(), owner_threads)
+                finally:
+                    gate.set()
+                    self.assertTrue(backend.close(1.0))
+
     def test_cancel_queued_does_not_interrupt_inflight_model(self):
         gate = Event()
         blocking = GateBackend(gate)

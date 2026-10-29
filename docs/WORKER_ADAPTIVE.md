@@ -51,6 +51,8 @@ deadline 从 scheduler 调用 submit 时开始，覆盖排队、模型 reset/预
 
 ## 结束、reset 与卡住的模型
 
+线程 worker 的 reset、推理或结果封装抛异常后，会将模型状态标记为无效，并返回 `PredictionFailure`。下一条请求（包括已排队的同 episode 请求）必须先在同一 worker 线程成功执行 reset，才会进入推理。如果 reset 再次失败，该请求只返回失败结果，后续请求仍须先尝试 reset；健康请求之间正常保留 episode 历史。恢复依赖模型与预处理器提供正确的 reset 实现。
+
 episode 结束时先回收当前可见结果，再取消 episode 的等待请求和在途结果归属。backend.close 使用有限等待，超过上限产生 `worker_shutdown_timeout`，运行函数可以返回。即使最后一次 poll 抛异常，也会尝试取消 episode 和关闭 worker。
 
 Python 线程方案不能强杀卡住的 CUDA/模型调用。close 超时后底层 daemon 线程仍可能运行、持有模型资源，但不会再发布结果；已关闭的 ThreadedPolicyBackend 不能复用。第四轮已提供可选的 [进程隔离后端](PROCESS_BACKEND.md)，支持终止、回收和重建进程；线程模式仍保留上述限制。
