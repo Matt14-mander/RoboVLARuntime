@@ -219,6 +219,11 @@ class ThreadedPolicyBackend:
                     ),
                 )
             except Exception as error:  # surfaced to the control thread by poll()
+                # A failed call may have partially mutated model/preprocessor state.
+                # Reset on this worker before any subsequent inference, including
+                # requests already queued for the same episode. Failed resets keep
+                # this state invalid until a later reset succeeds.
+                self._active_episode = None
                 result = PredictionFailure(
                     submission.request_id,
                     submission.requested_at,
