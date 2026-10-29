@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "samples": [
+    {
+      "sample_id": "frame-0",
+      "episode_id": "offline-demo",
+      "captured_at": 0.0,
+      "state": [0.1, 0.2, 0.3],
+      "payload": {"camera": [[[32, 64, 128]]]}
+    },
+    {
+      "sample_id": "frame-1",
+      "episode_id": "offline-demo",
+      "captured_at": 0.02,
+      "state": [0.2, 0.3, 0.4],
+      "payload": {"camera": [[[64, 128, 192]]]}
+    }
+  ]
+}

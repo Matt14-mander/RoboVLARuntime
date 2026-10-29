@@ -24,6 +24,51 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FluxVLACliTests(unittest.TestCase):
+    def test_independent_dimensions_survive_warmup_and_process_restart(self):
+        raw = json.loads(self.manifest.read_text(encoding="utf-8"))
+        for sample in raw["samples"]:
+            sample["state"] = [0.1, 0.2, 0.3]
+        self.manifest.write_text(json.dumps(raw), encoding="utf-8")
+        text = self.template.replace("state_dimension = 2", "state_dimension = 3")
+        code, stdout, stderr = self.invoke(text, extra=("--validate-only",))
+        self.assertEqual(code, 0, stderr)
+        validation = json.loads(stdout)
+        self.assertEqual(validation["observation_spec"]["state_dimension"], 3)
+        self.assertEqual(validation["action_dimension"], 2)
+        code, _, stderr = self.invoke()
+        self.assertEqual(code, 0, stderr)
+        directory, summary, _, predictions = self.artifacts()
+        self.assertEqual(summary["succeeded_samples"], 2)
+        self.assertEqual(summary["restarts"], 1)
+        self.assertEqual(summary["warmups_completed"], 2)
+        self.assertTrue(all(len(action) == 2 for p in predictions for action in p["chunk"]["actions"]))
+        resolved = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(resolved["observations"]["state_dimension"], 3)
+        audit = [json.loads(line) for line in (directory / "mock/audit.jsonl").read_text().splitlines()]
+        calls = [e for e in audit if e["kind"] == "predict"]
+        self.assertEqual({e["phase"] for e in calls}, {"warmup", "inference"})
+        self.assertEqual({e["generation"] for e in calls}, {1, 2})
+        self.assertTrue(all(e["observation_state"] == [0.1, 0.2, 0.3] for e in calls))
+
+    def test_legacy_config_infers_state_dimension_independently_of_action(self):
+        text = self.template.replace("state_dimension = 2\n", "")
+        text = text.replace("[action]\ndimension = 2", "[action]\ndimension = 7")
+        code, stdout, stderr = self.invoke(text, extra=("--validate-only",))
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["observation_spec"]["state_dimension"], 2)
+        self.assertEqual(json.loads(stdout)["action_dimension"], 7)
+        self.assertFalse(self.output.exists())
+
+    def test_state_contract_config_errors_fail_before_backend_start(self):
+        for dimension in ("true", "0", "-1", "1.5", '"2"', "3"):
+            text = self.template.replace("state_dimension = 2", f"state_dimension = {dimension}")
+            with self.subTest(dimension=dimension), patch("robovla_runtime.integrations.offline_inference._factory") as factory:
+                code, stdout, stderr = self.invoke(text)
+                self.assertEqual(code, 2, stderr)
+                self.assertEqual(json.loads(stderr)["error"], "validation_failed")
+                factory.assert_not_called()
+                self.assertFalse(self.output.exists())
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

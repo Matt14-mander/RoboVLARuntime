@@ -101,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.validate_only:
             print(json.dumps({"validation": "passed", "model_kind": config.model["kind"],
                               "scope": "config_and_observation_files", "model_loaded": False,
+                              "observation_spec": asdict(config.observation_spec),
+                              "action_dimension": config.action_spec.dimension,
                               "samples": len(observations.samples), "files": provenance}, ensure_ascii=False))
             return 0
         try:

@@ -8,17 +8,55 @@ import tempfile
 import time
 import unittest
 from contextlib import nullcontext
+from dataclasses import replace
 from pathlib import Path
 
 from benchmarks.fluxvla_fixtures import MockObservationFactory, make_simulated_factory, runtime_payload
 from robovla_runtime.backends import FluxVLABackend, PredictionFailure, ProcessBackendConfig, decode_first_batch
-from robovla_runtime.core import ActionSpec, Observation
+from robovla_runtime.core import ActionSpec, Observation, ObservationSpec
 from robovla_runtime.integrations import FluxVLALiberoFactory, FluxVLAProcessFactory
 from robovla_runtime.runtime import RuntimeConfig, run_realtime_runtime
 from tests.test_fluxvla_backend import FakeVLA
 
 
 class FluxVLAProcessTests(unittest.TestCase):
+    def test_independent_state_contract_applies_to_warmup_and_live_calls(self):
+        for steps in (0, 2):
+            for explicit in (False, True):
+                with self.subTest(steps=steps, explicit=explicit):
+                    model = FakeVLA()
+                    def build():
+                        return FluxVLABackend(model, lambda obs: {"state": obs.state}, decode_first_batch,
+                            ActionSpec(1, 0.02), inference_context=nullcontext)
+                    sample = Observation("ep", 0, 0.0, (1.0, 2.0, 3.0), {"camera": []})
+                    spec = ObservationSpec(3, ("camera",)) if explicit else None
+                    backend = FluxVLAProcessFactory(build, lambda index: sample, steps,
+                        model_is_stateless=True, observation_spec=spec)()
+                    backend.startup(lambda *args, **kwargs: None)
+                    backend.reset("ep")
+                    prediction = backend.request(sample, 0.0)
+                    self.assertEqual(prediction.chunk.spec.dimension, 1)
+                    self.assertTrue(all(call["state"] == (1.0, 2.0, 3.0) for call in model.calls))
+                    before = len(model.calls)
+                    with self.assertRaisesRegex(ValueError, "3 components"):
+                        backend.request(replace(sample, state=(1.0,)), 0.0)
+                    if explicit:
+                        with self.assertRaisesRegex(ValueError, "payload"):
+                            backend.request(replace(sample, payload={}), 0.0)
+                    self.assertEqual(len(model.calls), before)
+
+    def test_invalid_warmup_observation_is_rejected_before_model_call(self):
+        model = FakeVLA()
+        def build():
+            return FluxVLABackend(model, lambda obs: {}, decode_first_batch, ActionSpec(1, 0.02),
+                                 inference_context=nullcontext)
+        sample = Observation("ep", 0, 0.0, (0.0,), {"camera": []})
+        backend = FluxVLAProcessFactory(build, lambda index: sample, model_is_stateless=True,
+                                       observation_spec=ObservationSpec(3))()
+        with self.assertRaisesRegex(ValueError, "3 components"):
+            backend.startup(lambda *args, **kwargs: None)
+        self.assertFalse(model.calls)
+
     def factory(self, faults=(), steps=2):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

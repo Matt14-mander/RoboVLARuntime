@@ -41,6 +41,25 @@ class OfflineObservationTests(unittest.TestCase):
         self.path.write_text("changed after preflight", encoding="utf-8")
         self.assertEqual(loaded(0).payload["camera"][0][0], 1)
 
+    def test_inferred_state_contract_rejects_inconsistent_samples(self):
+        self.raw["samples"][0]["state"] = [0.0, 1.0, 2.0]
+        self.path.write_text(json.dumps(self.raw), encoding="utf-8")
+        loaded = load_observations(self.path, required_payload_keys=("camera",))
+        self.assertEqual(loaded.observation_spec.state_dimension, 3)
+        self.assertEqual(loaded(0).state, (0.0, 1.0, 2.0))
+        second = copy.deepcopy(self.raw["samples"][0])
+        second.update(sample_id="two", state=[0.0, 1.0])
+        self.raw["samples"].append(second)
+        self.path.write_text(json.dumps(self.raw), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, r"samples\[1\].state must have 3"):
+            load_observations(self.path)
+
+    def test_invalid_explicit_state_dimensions_fail_even_for_valid_manifest(self):
+        self.path.write_text(json.dumps(self.raw), encoding="utf-8")
+        for dimension in (True, 0, -1, 1.5, "2", 3):
+            with self.subTest(dimension=dimension), self.assertRaises(ValueError):
+                load_observations(self.path, state_dimension=dimension)
+
     def test_rejects_bad_schema_duplicates_dimensions_nonfinite_and_missing_payload(self):
         changes = [
             lambda r: r.update(version=2), lambda r: r.update(samples=[]),

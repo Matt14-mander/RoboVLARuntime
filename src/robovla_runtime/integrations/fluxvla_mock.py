@@ -105,6 +105,7 @@ class SimulatedLiberoFactory:
                 self.history += 1
                 audit("predict", phase=phase, model_history=self.history,
                       dataset_history=batch["dataset_history"], seed=batch.get("seed"),
+                      observation_state=batch.get("observation_state"),
                       num_inference_steps=batch.get("num_inference_steps"), unnorm_key=batch["unnorm_key"])
                 if (fault == "warmup_hang" and phase == "warmup") or (fault == "request_hang" and phase == "inference"):
                     hang()
@@ -175,7 +176,9 @@ class SimulatedLiberoFactory:
                 def __call__(self, observation):
                     payload = dict(observation.payload)
                     payload["phase"] = "warmup" if observation.episode_id == "__fluxvla_warmup__" else "inference"
-                    return preprocess(replace(observation, payload=payload))
+                    batch = dict(preprocess(replace(observation, payload=payload)))
+                    batch["observation_state"] = observation.state
+                    return batch
             backend.preprocess = OfflinePreprocessor()
         return backend
 

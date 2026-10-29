@@ -55,7 +55,8 @@ def _factory(config, observations, directory):
             k: v for k, v in model.items() if k not in {"kind", "warmup_steps", "model_is_stateless"}
         })
     return _LoggedFactory(
-        FluxVLAProcessFactory(builder, observations, model["warmup_steps"], model["model_is_stateless"]),
+        FluxVLAProcessFactory(builder, observations, model["warmup_steps"], model["model_is_stateless"],
+                              observation_spec=config.observation_spec),
         str(directory),
     )
 

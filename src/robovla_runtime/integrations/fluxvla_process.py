@@ -10,7 +10,7 @@ from pathlib import Path
 
 from robovla_runtime.backends.fluxvla import FluxVLABackend
 from robovla_runtime.backends.process import ProcessBackendConfig, ProcessPolicyBackend
-from robovla_runtime.core.types import ActionSpec, Observation
+from robovla_runtime.core.types import ActionSpec, Observation, ObservationSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +85,7 @@ class FluxVLAProcessFactory:
     observation_factory: Callable[[int], Observation] | None = None
     warmup_steps: int = 2
     model_is_stateless: bool = False
+    observation_spec: ObservationSpec | None = None
 
     def __post_init__(self) -> None:
         if not callable(self.backend_factory):
@@ -95,6 +96,8 @@ class FluxVLAProcessFactory:
             raise ValueError("warmup requires an observation_factory")
         if not isinstance(self.model_is_stateless, bool):
             raise TypeError("model_is_stateless must be boolean")
+        if self.observation_spec is not None and not isinstance(self.observation_spec, ObservationSpec):
+            raise TypeError("observation_spec must be an ObservationSpec")
 
     def __call__(self) -> _StartingFluxVLA:
         backend = self.backend_factory()
@@ -102,19 +105,28 @@ class FluxVLAProcessFactory:
             raise TypeError("backend_factory must build a FluxVLABackend")
         if not backend.has_model_reset and not self.model_is_stateless:
             raise ValueError("FluxVLA requires a model reset hook or explicit model_is_stateless=True")
-        return _StartingFluxVLA(backend, self.observation_factory, self.warmup_steps)
+        return _StartingFluxVLA(backend, self.observation_factory, self.warmup_steps, self.observation_spec)
 
     def create_backend(self, action_spec: ActionSpec, *, config: ProcessBackendConfig | None = None) -> ProcessPolicyBackend:
         return ProcessPolicyBackend(self, action_spec, config=config)
 
 
 class _StartingFluxVLA:
-    def __init__(self, backend, observation_factory, warmup_steps):
+    def __init__(self, backend, observation_factory, warmup_steps, observation_spec):
         self.backend = backend
         self.action_spec = backend.action_spec
         self.observation_factory = observation_factory
         self.warmup_steps = warmup_steps
+        self.observation_spec = observation_spec
         self._ready = False
+
+    def _validate_observation(self, observation):
+        if not isinstance(observation, Observation):
+            raise TypeError("observation must be an Observation")
+        # Legacy SDK callers infer from their first input, never from ActionSpec.
+        spec = self.observation_spec or ObservationSpec(len(observation.state))
+        spec.validate(observation)
+        self.observation_spec = spec
 
     def startup(self, report: Callable[..., None]) -> None:
         self._ready = False
@@ -124,10 +136,7 @@ class _StartingFluxVLA:
         for index in range(self.warmup_steps):
             # Keep the factory's source sample pristine even if a transform mutates it.
             source = copy.deepcopy(self.observation_factory(index))
-            if not isinstance(source, Observation):
-                raise TypeError("warmup factory must return Observation")
-            if len(source.state) != self.action_spec.dimension:
-                raise ValueError("warmup state does not match ActionSpec.dimension")
+            self._validate_observation(source)
             observation = replace(
                 source, episode_id="__fluxvla_warmup__", observation_id=index,
                 episode_generation=0,
@@ -148,4 +157,5 @@ class _StartingFluxVLA:
     def request(self, observation, requested_at):
         if not self._ready:
             raise RuntimeError("FluxVLA startup has not completed")
+        self._validate_observation(observation)
         return self.backend.request(observation, requested_at)

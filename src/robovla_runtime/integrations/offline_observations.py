@@ -9,7 +9,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from robovla_runtime.core import Observation
+from robovla_runtime.core import Observation, ObservationSpec
 
 
 def fields(value, allowed, required, label):
@@ -88,11 +88,14 @@ class OfflineSample:
 class OfflineObservations:
     samples: tuple[OfflineSample, ...]
     provenance: tuple[dict, ...]
+    observation_spec: ObservationSpec
 
     def observation(self, index: int, *, observation_id: int, captured_at: float, generation: int) -> Observation:
         sample = self.samples[index]
-        return Observation(sample.episode_id, observation_id, captured_at, sample.state,
-                           copy.deepcopy(sample.payload), generation)
+        observation = Observation(sample.episode_id, observation_id, captured_at, sample.state,
+                                  copy.deepcopy(sample.payload), generation)
+        self.observation_spec.validate(observation)
+        return observation
 
     def __call__(self, index: int) -> Observation:
         """A picklable warmup source with no file reread after validation."""
@@ -100,7 +103,7 @@ class OfflineObservations:
         return self.observation(sample_index, observation_id=index, captured_at=0.0, generation=0)
 
 
-def load_observations(path: str | Path, *, state_dimension: int, required_payload_keys=()) -> OfflineObservations:
+def load_observations(path: str | Path, *, state_dimension: int | None = None, required_payload_keys=()) -> OfflineObservations:
     manifest = Path(path).resolve()
     raw = read_json(manifest)
     fields(raw, {"version", "samples"}, {"version", "samples"}, "observation manifest")
@@ -108,6 +111,13 @@ def load_observations(path: str | Path, *, state_dimension: int, required_payloa
         raise ValueError("observation manifest version must be 1")
     if not isinstance(raw["samples"], list) or not raw["samples"]:
         raise ValueError("samples must be a non-empty array")
+    if state_dimension is None:
+        first = raw["samples"][0]
+        state = first.get("state") if isinstance(first, dict) else None
+        if not isinstance(state, list) or not state:
+            raise ValueError("samples[0].state must be a non-empty array to infer state_dimension")
+        state_dimension = len(state)
+    spec = ObservationSpec(state_dimension, required_payload_keys)
     provenance = {str(manifest): {"path": str(manifest), "sha256": sha256(manifest)}}
     samples, identifiers = [], set()
     for index, sample in enumerate(raw["samples"]):
@@ -119,9 +129,11 @@ def load_observations(path: str | Path, *, state_dimension: int, required_payloa
             raise ValueError(f"duplicate sample_id: {sample_id}")
         identifiers.add(sample_id)
         state = sample["state"]
-        if not isinstance(state, list) or len(state) != state_dimension:
-            raise ValueError(f"{label}.state must have {state_dimension} components")
-        state = tuple(float(number(x, f"{label}.state", minimum=-math.inf)) for x in state)
+        try:
+            spec.validate_state(state)
+        except ValueError as error:
+            raise ValueError(f"{label}.{error}") from error
+        state = tuple(float(x) for x in state)
         payload = sample["payload"]
         if not isinstance(payload, dict):
             raise ValueError(f"{label}.payload must be an object")
@@ -170,7 +182,7 @@ def load_observations(path: str | Path, *, state_dimension: int, required_payloa
                 raise ValueError(f"invalid array {key} in {array_path}: {error}") from error
             payload[key] = array
             provenance[str(array_path)] = {"path": str(array_path), "sha256": sha256(array_path)}
-        missing = set(required_payload_keys) - set(payload)
+        missing = set(spec.required_payload_keys) - set(payload)
         if missing:
             raise ValueError(f"{label}: missing required payload keys {sorted(missing)}")
         episode_id = nonempty(sample.get("episode_id", "offline"), f"{label}.episode_id")
@@ -178,4 +190,4 @@ def load_observations(path: str | Path, *, state_dimension: int, required_payloa
             raise ValueError("episode_id uses the reserved __fluxvla_ prefix")
         samples.append(OfflineSample(sample_id, episode_id,
             float(number(sample.get("captured_at", 0.0), f"{label}.captured_at")), state, payload))
-    return OfflineObservations(tuple(samples), tuple(provenance.values()))
+    return OfflineObservations(tuple(samples), tuple(provenance.values()), spec)

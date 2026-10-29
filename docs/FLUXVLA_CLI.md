@@ -14,6 +14,12 @@ python -m robovla_runtime.cli infer-fluxvla-process --config configs/fluxvla_off
 
 示例故意让第一个模型进程在正式推理时卡死，随后重新加载、预热并重试同一条样本。两条样本最终均成功时返回 0，同时保留首次失败的诊断。将 `fault_plan = []` 可运行无故障版本。
 
+独立观测契约示例使用 **3 维状态、2 维动作**，同样验证预热和卡死后重启：
+
+```powershell
+python -m robovla_runtime.cli infer-fluxvla-process --config configs/fluxvla_offline_state3_action2.toml --output-root runs/independent-observation
+```
+
 默认 stdout 输出 JSONL 事件及最后一行 summary/产物路径。`--quiet` 仅打印最后一行，文件中的事件不减少。模型进程中的 Python stdout/stderr 写入独立 worker 日志；底层原生库直接写 OS 文件描述符的输出不保证被此 Python 重定向捕获。
 
 独立 CLI 验证覆盖正常、推理卡死、预热异常、预热卡死、重启耗尽和非法配置：
@@ -32,11 +38,15 @@ python -m benchmarks.run_fluxvla_cli --output-dir runs/fluxvla_cli_rerun
 | --- | --- |
 | `action` | 必填 dimension、period_s、representation、unit、action_space、coordinate_frame；其他 ActionSpec 字段可选 |
 | `model` | 必填 kind（mock / fluxvla）、task_description；warmup_steps 默认 2，model_is_stateless 默认 false |
-| `observations` | 必填 manifest 和非空 required_payload_keys 列表 |
+| `observations` | 必填 manifest 和非空 required_payload_keys 列表；推荐显式填写正整数 state_dimension |
 | `process` | startup_timeout_s、execution_timeout_s、terminate_grace_s、max_restarts；沿用 ProcessBackendConfig 默认值 |
 | `inference` | repeats 默认 1、max_attempts_per_sample 默认 2、poll_interval_s 默认 0.005、close_timeout_s 默认 2.0 |
 
-时间必须是有限数值，超时、轮询与关闭等待必须大于 0；计数必须是真正的整数，不接受布尔值冒充整数。warmup_steps、max_restarts 允许 0。动作枚举、维度、单位和 component_units 沿用 ActionSpec 校验。当前 Observation 的 state 元数据长度须与 action.dimension 一致；payload 中供模型消费的原始 state 数组可以另外声明。
+时间必须是有限数值，超时、轮询与关闭等待必须大于 0；计数必须是真正的整数，不接受布尔值冒充整数。warmup_steps、max_restarts 允许 0。动作枚举、维度、单位和 component_units 沿用 ActionSpec 校验。
+
+`observations.state_dimension` 与 `action.dimension` 相互独立。`ObservationSpec` 约束 state 长度、有限实数值和必需 payload 键；`ActionSpec` 约束输出动作。state 不接受布尔值或数字字符串，也不会为匹配动作维度自动截断或补零。所有样本（包括不同 episode）须符合同一观测契约，预热、正式请求和重启后也使用这一契约。
+
+兼容既有 version 1 配置：省略 state_dimension 时，从首条样本的非空 state 数组推断，再校验全部样本的一致性；不使用 action.dimension 作为默认值。显式配置错误或推断后的样本不一致均在启动前返回退出码 2。`--validate-only` 输出独立的 observation_spec 和 action_dimension，`config.json` 总是保存解析后的明确 state_dimension。
 
 TOML 中的 manifest、模型配置、checkpoint 和 fluxvla_root 均相对 **TOML 所在目录** 解析。数组文件则相对 **观测 JSON 所在目录** 解析。支持绝对路径，不依赖启动命令时的工作目录。输出目录仍按 CLI 调用时的工作目录解析。
 
@@ -73,6 +83,7 @@ JSON 清单版本为 1，必须包含非空 samples。sample_id 在清单内唯�
 
 - `episode_id` 可省略，默认为 offline；`__fluxvla_` 前缀保留给启动阶段。
 - `captured_at` 可省略，默认为 0，必须有限且非负。它作为源时间保存，命令不会按源时间间隔 sleep。
+- `state` 是非空的一维有限实数数组，长度由独立观测契约约束。它保存在 Observation 中，不会自动替代或注入真实 FluxVLA 的 payload；LIBERO 预处理仍从 payload 中读取原始机器人状态和图像，数组 shape/dtype 继续由各数组描述符校验。
 - `payload` 可包含普通 JSON 值。示例模拟相机使用小型嵌套列表，无第三方依赖。
 - `arrays` 可省略；每项必须声明 path、shape、dtype。NPZ 必须另给 key，NPY 不接受 key。数组与 inline payload 不得使用相同键。
 - NPY/NPZ 始终使用 `allow_pickle=False`，只允许有限的实数或布尔数组；拒绝 object、字符串、复数、非有限值和 shape/dtype 不匹配。
