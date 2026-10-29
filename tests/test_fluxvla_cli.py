@@ -165,6 +165,37 @@ class FluxVLACliTests(unittest.TestCase):
         self.assertTrue((directory / "summary.json").is_file())
 
     @unittest.skipIf(np is None, "optional numpy is not installed")
+    def test_empty_and_truncated_npy_cli_returns_structured_validation_failure(self):
+        stream = io.BytesIO()
+        np.save(stream, np.zeros((2, 2, 3), dtype=np.uint8))
+        complete = stream.getvalue()
+        raw = json.loads(self.manifest.read_text(encoding="utf-8"))
+        raw["samples"][0]["payload"] = {}
+        raw["samples"][0]["arrays"] = {
+            "camera": {"path": "camera.npy", "shape": [2, 2, 3], "dtype": "uint8"},
+        }
+        self.manifest.write_text(json.dumps(raw), encoding="utf-8")
+        environment = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        for name, data in (("empty", b""), ("truncated_header", complete[:12]),
+                           ("truncated_data", complete[:-1])):
+            (self.root / "camera.npy").write_bytes(data)
+            for extra in ([], ["--validate-only"]):
+                with self.subTest(case=name, validate_only=bool(extra)):
+                    result = subprocess.run([
+                        sys.executable, "-m", "robovla_runtime.cli", "infer-fluxvla-process",
+                        "--config", str(self.config), "--output-root", str(self.output),
+                        "--quiet", *extra,
+                    ], cwd=self.root, env=environment, capture_output=True,
+                        text=True, encoding="utf-8", timeout=25)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertEqual(result.stdout, "")
+                    error = json.loads(result.stderr)
+                    self.assertEqual(error["error"], "validation_failed")
+                    self.assertIn("invalid array camera in", error["message"])
+                    self.assertIn(str(self.root / "camera.npy"), error["message"])
+                    self.assertFalse(self.output.exists())
+
+    @unittest.skipIf(np is None, "optional numpy is not installed")
     def test_npz_samples_reach_spawned_model_via_cli(self):
         np.savez(self.root / "camera.npz", image=np.ones((2, 2, 3), dtype=np.uint8))
         raw = json.loads(self.manifest.read_text(encoding="utf-8"))

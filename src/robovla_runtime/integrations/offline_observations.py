@@ -166,7 +166,7 @@ def load_observations(path: str | Path, *, state_dimension: int, required_payloa
                     raise ValueError("arrays must contain finite real numeric or boolean values")
                 if list(array.shape) != shape or array.dtype != np.dtype(descriptor["dtype"]):
                     raise ValueError(f"array {key} shape/dtype differs from its manifest")
-            except (ValueError, KeyError, TypeError, OSError) as error:
+            except (ValueError, KeyError, TypeError, OSError, EOFError) as error:
                 raise ValueError(f"invalid array {key} in {array_path}: {error}") from error
             payload[key] = array
             provenance[str(array_path)] = {"path": str(array_path), "sha256": sha256(array_path)}
