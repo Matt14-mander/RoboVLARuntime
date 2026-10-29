@@ -1,6 +1,6 @@
 from .clock import VirtualClock
 from .events import Event, EventLog
-from .types import ActionChunk, ActionSpec, ExecutionRecord, Observation
+from .types import ActionChunk, ActionSpec, ExecutionRecord, Observation, ObservationSpec
 
 __all__ = [
     "ActionChunk",
@@ -9,6 +9,7 @@ __all__ = [
     "EventLog",
     "ExecutionRecord",
     "Observation",
+    "ObservationSpec",
     "VirtualClock",
 ]
 

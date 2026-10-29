@@ -18,6 +18,7 @@ inference_seed = 11
 fault_plan = ["request_hang"]
 
 [observations]
+state_dimension = 2
 manifest = "../samples/fluxvla_offline_mock.json"
 required_payload_keys = ["camera"]
 

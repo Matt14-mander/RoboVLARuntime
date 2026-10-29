@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, fields as dataclass_fields
 from pathlib import Path
 
 from robovla_runtime.backends import ProcessBackendConfig
-from robovla_runtime.core import ActionSpec
+from robovla_runtime.core import ActionSpec, ObservationSpec
 from .fluxvla_process import FluxVLALiberoFactory
 from .offline_observations import fields, integer, load_observations, nonempty, number, sha256
 
@@ -21,17 +21,21 @@ class OfflineInferenceConfig:
     action_spec: ActionSpec
     model: dict
     manifest: str
-    required_payload_keys: tuple[str, ...]
+    observation_spec: ObservationSpec
     process: ProcessBackendConfig
     repeats: int = 1
     max_attempts_per_sample: int = 2
     poll_interval_s: float = 0.005
     close_timeout_s: float = 2.0
 
+    @property
+    def required_payload_keys(self):
+        return self.observation_spec.required_payload_keys
+
     def resolved(self):
         return {
             "version": 1, "source": self.source, "action": asdict(self.action_spec), "model": self.model,
-            "observations": {"manifest": self.manifest, "required_payload_keys": self.required_payload_keys},
+            "observations": {"manifest": self.manifest, **asdict(self.observation_spec)},
             "process": asdict(self.process),
             "inference": {name: getattr(self, name) for name in (
                 "repeats", "max_attempts_per_sample", "poll_interval_s", "close_timeout_s",
@@ -123,7 +127,9 @@ def load_inference_config(path: str | Path):
         else:
             number(value, f"inference.{key}", positive=True)
     observations = raw["observations"]
-    fields(observations, {"manifest", "required_payload_keys"}, {"manifest", "required_payload_keys"}, "observations")
+    fields(observations, {"manifest", "state_dimension", "required_payload_keys"}, {"manifest", "required_payload_keys"}, "observations")
+    if "state_dimension" in observations:
+        integer(observations["state_dimension"], "observations.state_dimension", 1)
     required = observations["required_payload_keys"]
     if not isinstance(required, list) or not required:
         raise ValueError("observations.required_payload_keys must be a non-empty array")
@@ -131,9 +137,9 @@ def load_inference_config(path: str | Path):
     if len(set(required)) != len(required):
         raise ValueError("duplicate required payload key")
     manifest = (path.parent / nonempty(observations["manifest"], "observations.manifest")).resolve()
-    loaded = load_observations(manifest, state_dimension=spec.dimension, required_payload_keys=required)
+    loaded = load_observations(manifest, state_dimension=observations.get("state_dimension"), required_payload_keys=required)
     if model["kind"] == "mock" and any("camera" not in sample.payload for sample in loaded.samples):
         raise ValueError("mock model observations must contain camera payload")
-    config = OfflineInferenceConfig(str(path), spec, model, str(manifest), required, process_config, **inference)
+    config = OfflineInferenceConfig(str(path), spec, model, str(manifest), loaded.observation_spec, process_config, **inference)
     provenance = [{"path": str(path), "sha256": sha256(path)}, *loaded.provenance]
     return config, loaded, provenance

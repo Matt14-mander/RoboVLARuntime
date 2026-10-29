@@ -111,3 +111,9 @@ This command saves predictions and lifecycle diagnostics without executing robot
 actions. Numeric NPY/NPZ payloads are also supported with the optional `offline`
 dependency extra. Real models use `model.kind="fluxvla"` and verified model/input
 paths; static validation does not load the model or check CUDA.
+
+Observation state dimensions are independent of action dimensions. Configure
+`observations.state_dimension` explicitly; legacy configs infer it from the first
+sample and validate all remaining samples against it. The
+`configs/fluxvla_offline_state3_action2.toml` example validates three state
+components and two action components through warmup, inference, and restart.

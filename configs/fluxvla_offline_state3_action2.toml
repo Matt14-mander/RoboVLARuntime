@@ -1,0 +1,30 @@
+version = 1
+
+[action]
+dimension = 2
+period_s = 0.02
+representation = "absolute_position"
+unit = "normalized"
+action_space = "joint"
+coordinate_frame = "joint"
+
+[model]
+kind = "mock"
+task_description = "infer two actions from a three-component observation"
+warmup_steps = 2
+timing_mode = "diagnostic"
+fault_plan = ["request_hang"]
+
+[observations]
+state_dimension = 3
+manifest = "../samples/fluxvla_offline_state3.json"
+required_payload_keys = ["camera"]
+
+[process]
+startup_timeout_s = 5.0
+execution_timeout_s = 0.2
+terminate_grace_s = 0.1
+max_restarts = 2
+
+[inference]
+max_attempts_per_sample = 2

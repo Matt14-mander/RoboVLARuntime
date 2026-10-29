@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
+from numbers import Real
 from typing import Literal
 
 
@@ -31,6 +33,44 @@ class Observation:
             raise ValueError("state must not be empty")
         if self.episode_generation < 0:
             raise ValueError("episode_generation must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationSpec:
+    """Input contract independent of the policy's output ActionSpec."""
+    state_dimension: int
+    required_payload_keys: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if type(self.state_dimension) is not int or self.state_dimension <= 0:
+            raise ValueError("state_dimension must be a positive integer")
+        keys = self.required_payload_keys
+        if not isinstance(keys, (list, tuple)) or any(
+            not isinstance(key, str) or not key.strip() for key in keys
+        ):
+            raise ValueError("required_payload_keys must contain non-empty strings")
+        if len(set(keys)) != len(keys):
+            raise ValueError("duplicate required payload key")
+        object.__setattr__(self, "required_payload_keys", tuple(keys))
+
+    def validate_state(self, state) -> None:
+        if not isinstance(state, (list, tuple)) or len(state) != self.state_dimension:
+            raise ValueError(f"state must have {self.state_dimension} components")
+        if any(isinstance(value, bool) or not isinstance(value, Real)
+               or not math.isfinite(value) for value in state):
+            raise ValueError("state must contain finite real numbers, not booleans")
+
+    def validate(self, observation: Observation) -> None:
+        if not isinstance(observation, Observation):
+            raise TypeError("observation must be an Observation")
+        validate_timestamp(observation.captured_at, "captured_at")
+        self.validate_state(observation.state)
+        if self.required_payload_keys:
+            if not isinstance(observation.payload, Mapping):
+                raise ValueError("required payload keys need a mapping payload")
+            missing = set(self.required_payload_keys) - set(observation.payload)
+            if missing:
+                raise ValueError(f"missing required payload keys {sorted(missing)}")
 
 
 @dataclass(frozen=True, slots=True)
