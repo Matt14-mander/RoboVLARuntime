@@ -67,6 +67,10 @@ class ActionBuffer:
         if chunk.episode_generation != self.episode_generation:
             return ChunkAcceptance(False, "wrong_generation")
         try:
+            chunk.validate_timestamps()
+        except (ValueError, TypeError, OverflowError):
+            return ChunkAcceptance(False, "invalid_timestamp")
+        try:
             chunk.spec.require_time_aligned_execution()
         except ValueError:
             return ChunkAcceptance(False, "unsupported_action_spec")

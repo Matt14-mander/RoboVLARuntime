@@ -10,7 +10,7 @@ import math
 from robovla_runtime.backends.base import PendingPrediction
 from robovla_runtime.backends.threaded import AsyncPolicyBackend, PredictionFailure
 from robovla_runtime.core.events import EventLog
-from robovla_runtime.core.types import Observation
+from robovla_runtime.core.types import Observation, validate_timestamp
 from robovla_runtime.execution.action_buffer import ActionBuffer
 from .adaptive import AdaptivePrefetchConfig, AdaptivePrefetchController
 
@@ -134,6 +134,17 @@ class WorkerAsyncScheduler:
                     self._discard(now, request_id, reason)
                     continue
                 request, retired_reason = retired
+
+            # IPC/custom backends may bypass dataclass construction validation.
+            # Reject before emitting timings, updating estimates or touching the buffer.
+            try:
+                validate_timestamp(result.requested_at, "requested_at")
+                if isinstance(result, PendingPrediction):
+                    result.validate_timestamps()
+            except (ValueError, TypeError, OverflowError):
+                self._retire(request_id, request, "invalid_timestamp")
+                self._discard(now, request_id, "invalid_timestamp")
+                continue
 
             result_episode = (
                 result.episode_id if isinstance(result, PredictionFailure)

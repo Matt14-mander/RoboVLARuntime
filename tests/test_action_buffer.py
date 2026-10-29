@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import pickle
 
 from robovla_runtime.core.types import ActionChunk, ActionSpec
 from robovla_runtime.execution.action_buffer import ActionBuffer
@@ -26,6 +27,23 @@ def make_chunk(
 
 
 class ActionBufferTests(unittest.TestCase):
+    def test_invalid_deserialized_timestamps_do_not_replace_valid_tail(self):
+        for field in ("source_observation_time", "ready_at", "start_at"):
+            for value in (float("nan"), float("inf"), -float("inf"), -0.01):
+                with self.subTest(field=field, value=value):
+                    buffer = ActionBuffer("episode-a", max_actions_per_chunk=4)
+                    self.assertTrue(buffer.accept(make_chunk(1), 0.0).accepted)
+                    invalid = make_chunk(2)
+                    object.__setattr__(invalid, field, value)
+                    invalid = pickle.loads(pickle.dumps(invalid))
+                    result = buffer.accept(invalid, 0.1)
+                    self.assertFalse(result.accepted)
+                    self.assertEqual(result.reason, "invalid_timestamp")
+                    self.assertEqual(buffer.pop(0.1).request_id, 1)
+                    self.assertAlmostEqual(buffer.coverage_s(0.1), 0.3)
+                    # Rejection must not reserve a request ID before validation.
+                    self.assertTrue(buffer.accept(make_chunk(2), 0.2).accepted)
+
     # Test cases for ActionBuffer, which is a bounded, time-aligned action chunk buffer.
     def test_each_action_is_consumed_at_most_once(self) -> None:
         buffer = ActionBuffer("episode-a")

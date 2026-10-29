@@ -63,6 +63,7 @@ def _factory(config, observations, directory):
 def _validate_result(result, request_id, observation, requested_at, received_at, spec):
     if not isinstance(result, PendingPrediction):
         raise ValueError("unknown result type")
+    result.validate_timestamps()
     chunk = result.chunk
     if not (
         result.request_id == chunk.request_id == request_id

@@ -43,6 +43,7 @@ deadline 从 scheduler 调用 submit 时开始，覆盖排队、模型 reset/预
 - 超时只记录一次 `prediction_timed_out`。ThreadedPolicyBackend 提供 `cancel_queued(request_id)`，原子移除尚未开始的等待请求；已开始的推理继续运行。其他后端可选实现此非阻塞能力。
 - 迟到结果不会调用 ActionBuffer.accept，也不会清空仍然有效的旧动作。无可用动作时继续由环境的 fallback_command 决定命令。
 - 结果必须匹配已提交的 request ID、episode、buffer generation、源 observation ID 和时间；未知结果、身份不匹配、已替换请求、重复结果及比已接收观测更旧的结果都拒绝。
+- 观测 `captured_at`、动作块的源观测/ready/start 时间和预测的 requested/ready 时间必须有限且非负；动作块计算出的结束时间也必须有限。worker 在结果接收时再次校验，非法时间戳以 `prediction_discarded(reason="invalid_timestamp")` 丢弃，不写入耗时指标、不更新自适应估计、不替换有效动作，控制循环继续运行。ActionBuffer 和离线推理入口也会复查动作时间戳，防止反序列化绕过构造校验。
 - 已退休请求保留最多 256 条诊断元数据，不保留图像 payload。过久后才返回、已无法归属的结果以 `unknown_request` 丢弃；因此 late_result_count 不是所有物理迟到结果的无限历史统计。
 
 正常完成和能够确认归属的迟到完成都可以更新自适应分位数，样本为 `collection_time - submitted_at`，包含排队与取回延迟。迟到样本有 `sample_kind="late_completion"`，仅影响估计，不影响动作接收。重复结果不会重复计入估计。

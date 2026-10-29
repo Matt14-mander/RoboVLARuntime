@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 
+def validate_timestamp(value: float, name: str) -> None:
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be finite and non-negative")
+
+
 @dataclass(frozen=True, slots=True)
 class Observation:
     episode_id: str
@@ -21,8 +26,7 @@ class Observation:
             raise ValueError("episode_id must not be empty")
         if self.observation_id < 0:
             raise ValueError("observation_id must be non-negative")
-        if self.captured_at < 0:
-            raise ValueError("captured_at must be non-negative")
+        validate_timestamp(self.captured_at, "captured_at")
         if not self.state:
             raise ValueError("state must not be empty")
         if self.episode_generation < 0:
@@ -111,10 +115,7 @@ class ActionChunk:
             raise ValueError("episode_id must not be empty")
         if self.request_id < 0 or self.source_observation_id < 0:
             raise ValueError("request and observation ids must be non-negative")
-        if self.source_observation_time < 0 or self.ready_at < 0:
-            raise ValueError("timestamps must be non-negative")
-        if self.start_at < self.source_observation_time:
-            raise ValueError("start_at cannot precede the source observation")
+        self.validate_timestamps()
         if not self.actions:
             raise ValueError("an action chunk must contain at least one action")
         if any(len(action) != self.spec.dimension for action in self.actions):
@@ -123,6 +124,14 @@ class ActionChunk:
             self.spec.validate_command(action)
         if self.episode_generation < 0:
             raise ValueError("episode_generation must be non-negative")
+
+    def validate_timestamps(self) -> None:
+        """Also callable at receive boundaries; unpickling skips __post_init__."""
+        for name in ("source_observation_time", "ready_at", "start_at"):
+            validate_timestamp(getattr(self, name), name)
+        if self.start_at < self.source_observation_time:
+            raise ValueError("start_at cannot precede the source observation")
+        validate_timestamp(self.end_at, "end_at")
 
     @property
     def end_at(self) -> float:

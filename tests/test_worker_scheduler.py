@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from threading import Event
+import json
 import unittest
 
 from robovla_runtime.backends import (
@@ -71,6 +72,68 @@ class ControlledBackend:
 
 
 class WorkerSchedulerTests(unittest.TestCase):
+    def test_invalid_result_timestamps_are_discarded_before_metrics_and_recover(self):
+        fields = ("requested_at", "ready_at", "chunk.source_observation_time",
+                  "chunk.ready_at", "chunk.start_at")
+        for field in fields:
+            for value in (float("nan"), float("inf"), -float("inf"), -0.01):
+                with self.subTest(field=field, value=value):
+                    backend, log, buffer, scheduler, capture = self.harness()
+                    result = backend.success(0, 0.01)
+                    target = result.chunk if field.startswith("chunk.") else result
+                    object.__setattr__(target, field.split(".")[-1], value)
+                    scheduler.poll(0.01, buffer)
+                    self.assertIsNone(buffer.pop(0.01))
+                    self.assertFalse(self.events(log, "prediction_ready"))
+                    self.assertEqual(len(scheduler.prefetch.samples), 0)
+                    self.assertEqual(self.events(log, "prediction_discarded")[0].data["reason"],
+                                     "invalid_timestamp")
+                    scheduler.tick(0.02, buffer, capture)
+                    backend.success(1, 0.03)
+                    scheduler.poll(0.03, buffer)
+                    self.assertEqual(buffer.pop(0.03).request_id, 1)
+                    self.assertEqual(len(scheduler.prefetch.samples), 1)
+                    json.dumps([e.data for e in log.events], allow_nan=False)
+
+    def test_runtime_continues_after_invalid_chunk_and_executes_next_prediction(self):
+        class InvalidThenHealthyBackend(ControlledBackend):
+            def submit(self, observation, requested_at):
+                receipt = super().submit(observation, requested_at)
+                result = self.success(receipt.request_id, requested_at)
+                if receipt.request_id == 0:
+                    object.__setattr__(result.chunk, "start_at", float("nan"))
+                return receipt
+
+        for mode in ("fixed", "adaptive"):
+            with self.subTest(mode=mode):
+                backend = InvalidThenHealthyBackend()
+                clock = [0.0]
+                def sleep(duration):
+                    clock[0] += duration
+                result = run_realtime_runtime(
+                    RuntimeConfig(scheduler="worker_async", worker_prefetch=mode,
+                                  period_s=0.01, duration_s=0.05), backend,
+                    timer=lambda: clock[0], sleeper=sleep,
+                )
+                self.assertEqual(len(result.records), 5)
+                executed = {r.request_id for r in result.records if r.request_id is not None}
+                self.assertNotIn(0, executed)
+                self.assertIn(1, executed)
+                discarded = [e for e in result.events if e.type == "prediction_discarded"]
+                self.assertEqual(discarded[0].data["reason"], "invalid_timestamp")
+                self.assertIsNotNone(backend.close_timeout)
+                json.dumps(result.summary, allow_nan=False)
+
+    def test_invalid_failure_timestamp_is_discarded_without_poisoning_events(self):
+        backend, log, buffer, scheduler, _ = self.harness()
+        backend.results.append(PredictionFailure(0, float("nan"), "ep", "RuntimeError", "failed"))
+        scheduler.poll(0.01, buffer)
+        self.assertEqual(self.events(log, "prediction_discarded")[0].data["reason"],
+                         "invalid_timestamp")
+        self.assertFalse(self.events(log, "prediction_failed"))
+        self.assertEqual(len(scheduler.prefetch.samples), 0)
+        json.dumps([e.data for e in log.events], allow_nan=False)
+
     def harness(self, *, adaptive=True, timeout=0.05, clock=None):
         backend = ControlledBackend()
         log = EventLog()

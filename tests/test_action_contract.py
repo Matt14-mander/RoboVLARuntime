@@ -1,12 +1,48 @@
 from dataclasses import replace
 import unittest
 
-from robovla_runtime.core.types import ActionSpec
+from robovla_runtime.backends.base import PendingPrediction
+from robovla_runtime.core.types import ActionSpec, Observation
+from robovla_runtime.integrations.offline_inference import _validate_result
 from robovla_runtime.execution.action_buffer import ActionBuffer
 from tests.test_action_buffer import make_chunk
 
 
 class ActionContractTests(unittest.TestCase):
+    def test_observation_timestamp_must_be_finite_and_nonnegative(self):
+        observation = Observation("ep", 0, 0.0, (0.0,))
+        for value in (float("nan"), float("inf"), -float("inf"), -0.01):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                replace(observation, captured_at=value)
+        self.assertEqual(replace(observation, captured_at=0.5).captured_at, 0.5)
+
+    def test_chunk_timestamps_must_be_finite_and_nonnegative(self):
+        for field in ("source_observation_time", "ready_at", "start_at"):
+            for value in (float("nan"), float("inf"), -float("inf"), -0.01):
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    replace(make_chunk(), **{field: value})
+
+    def test_chunk_rejects_overflowing_end_timestamp(self):
+        chunk = make_chunk(count=2)
+        with self.assertRaises(ValueError):
+            replace(chunk, spec=replace(chunk.spec, period_s=1e308))
+
+    def test_prediction_timestamps_must_be_finite_and_nonnegative(self):
+        prediction = PendingPrediction(1, 0.0, 0.0, make_chunk())
+        for field in ("requested_at", "ready_at"):
+            for value in (float("nan"), float("inf"), -float("inf"), -0.01):
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    replace(prediction, **{field: value})
+
+    def test_offline_result_validation_rechecks_chunk_timestamps(self):
+        chunk = make_chunk()
+        observation = Observation(chunk.episode_id, chunk.source_observation_id, 0.0, (0.0,))
+        prediction = PendingPrediction(chunk.request_id, 0.0, 0.0, chunk)
+        # Simulate a deserialized backend result that bypasses __post_init__.
+        object.__setattr__(chunk, "start_at", float("nan"))
+        with self.assertRaises(ValueError):
+            _validate_result(prediction, chunk.request_id, observation, 0.0, 0.1, chunk.spec)
+
     def test_cartesian_delta_can_be_described_but_not_time_aligned(self):
         spec = ActionSpec(
             7, 0.1, representation="delta_position", unit="controller_action",
