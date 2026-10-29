@@ -102,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"validation": "passed", "model_kind": config.model["kind"],
                               "scope": "config_and_observation_files", "model_loaded": False,
                               "observation_spec": asdict(config.observation_spec),
+                              "model_input": asdict(config.input_spec) if config.input_spec else None,
                               "action_dimension": config.action_spec.dimension,
                               "samples": len(observations.samples), "files": provenance}, ensure_ascii=False))
             return 0

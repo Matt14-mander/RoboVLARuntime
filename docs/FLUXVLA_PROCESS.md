@@ -38,7 +38,9 @@ python -m benchmarks.run_fluxvla_process --output-dir runs/fluxvla_process_rerun
 
 `FluxVLAProcessFactory` 包装模型配方，负责启动条件：
 
-可传入独立的 `observation_spec=ObservationSpec(state_dimension=3, required_payload_keys=("camera",))`；预热和正式请求均在进入模型前校验该契约，状态维度无需等于动作维度。离线 CLI 始终传入已解析的观测契约。旧 SDK 调用未传契约时，从首次预热观测（零预热时为首次正式请求）推断状态维度，并在该 worker 生命周期内保持一致；推荐调用方显式传入契约。真实模型输入键及其语义仍由模型预处理器负责。
+可传入独立的 `observation_spec=ObservationSpec(state_dimension=3, required_payload_keys=("camera",))`；预热和正式请求均在进入模型前校验该契约，状态维度无需等于动作维度。离线 CLI 始终传入已解析的观测契约。旧 SDK 调用未传契约时，从首次预热观测（零预热时为首次正式请求）推断状态维度，并在该 worker 生命周期内保持一致；推荐调用方显式传入契约。
+
+`FluxVLALiberoFactory(input_spec=FluxVLAModelInputSpec(...))` 可显式约束相机与原始状态的 shape/dtype，并通过 `StatePayloadMapping(key, indices)` 将 Observation.state 分量转换为 payload 数组。契约类均可从 robovla_runtime.integrations 导入，标准 pickle 可序列化；父进程不导入 torch/FluxVLA。已初始化 runner 可给 `FluxVLABackend.from_libero_runner` 或 `FluxVLALiberoPreprocessor` 传相同 input_spec。校验发生于 dataset 变换前，覆盖预热、正式请求和重启后的新工厂；仅创建 SDK 配方不会提前校验观测，CLI 会校验全部离线样本。详见[模型输入契约](FLUXVLA_CLI.md#显式模型输入契约)。
 
 - `backend_factory`：在子进程构建 FluxVLABackend 的可序列化 callable。可用上述 LIBERO 工厂，也可提供其他 FluxVLA 模型的自定义构建函数。
 - `observation_factory(index)`：返回有效预热 Observation 的模块顶层 callable；读取 CPU 图像/state 样本等工作也在子进程中进行。

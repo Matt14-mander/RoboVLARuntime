@@ -81,6 +81,7 @@ class SimulatedLiberoFactory:
         fault = self.faults[index] if index < len(self.faults) else ""
         dimension = self.recipe.action_spec.dimension
         offline_mode = self.offline_mode
+        input_spec = self.recipe.input_spec
 
         def audit(kind, **data):
             with self.audit_path.open("a", encoding="utf-8") as stream:
@@ -106,6 +107,7 @@ class SimulatedLiberoFactory:
                 audit("predict", phase=phase, model_history=self.history,
                       dataset_history=batch["dataset_history"], seed=batch.get("seed"),
                       observation_state=batch.get("observation_state"),
+                      model_inputs=batch.get("model_inputs"),
                       num_inference_steps=batch.get("num_inference_steps"), unnorm_key=batch["unnorm_key"])
                 if (fault == "warmup_hang" and phase == "warmup") or (fault == "request_hang" and phase == "inference"):
                     hang()
@@ -143,7 +145,14 @@ class SimulatedLiberoFactory:
                 self.history += 1
                 audit("preprocess", phase=raw["phase"], is_new_episode=raw["is_new_episode"],
                       task_description=raw["task_description"])
-                return {"dataset_history": self.history, "phase": raw["phase"]}, None
+                batch = {"dataset_history": self.history, "phase": raw["phase"]}
+                if input_spec is not None:
+                    batch["model_inputs"] = {
+                        spec.key: {"shape": list(raw[spec.key].shape), "dtype": str(raw[spec.key].dtype),
+                                   "values": raw[spec.key].tolist() if spec.kind == "state" else None}
+                        for spec in input_spec.arrays
+                    }
+                return batch, None
 
             def denormalize_action(self, data):
                 if data["norm_stats_key"] != self.norm_stats_key or data["task_suite_name"] != self.task_suite_name:

@@ -24,6 +24,110 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FluxVLACliTests(unittest.TestCase):
+    def typed_inputs(self):
+        raw = json.loads(self.manifest.read_text(encoding="utf-8"))
+        np.save(self.root / "camera.npy", np.zeros((2, 3, 3), dtype="uint8"))
+        np.save(self.root / "raw.npy", np.array([4.5], dtype="float64"))
+        for sample in raw["samples"]:
+            sample["state"] = [1.25, 2.5, 3.75]
+            sample["payload"] = {}
+            sample["arrays"] = {
+                "camera": {"path": "camera.npy", "shape": [2, 3, 3], "dtype": "uint8"},
+                "raw_state": {"path": "raw.npy", "shape": [1], "dtype": "float64"},
+            }
+        self.manifest.write_text(json.dumps(raw), encoding="utf-8")
+        return self.template.replace("state_dimension = 2", "state_dimension = 3") + '''
+[[model_input.arrays]]
+key = "camera"
+kind = "camera"
+shape = [2, 3, 3]
+dtype = "uint8"
+[[model_input.arrays]]
+key = "proprio"
+kind = "state"
+shape = [2]
+dtype = "float32"
+[[model_input.arrays]]
+key = "raw_state"
+kind = "state"
+shape = [1]
+dtype = "float64"
+[[model_input.state_mapping]]
+key = "proprio"
+indices = [2, 0]
+'''
+
+    @unittest.skipIf(np is None, "numpy is optional")
+    def test_model_input_mapping_survives_warmup_and_process_restart(self):
+        text = self.typed_inputs()
+        code, stdout, stderr = self.invoke(text, extra=("--validate-only",))
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["model_input"]["state_mapping"][0]["indices"], [2, 0])
+        self.assertFalse(self.output.exists())
+        code, _, stderr = self.invoke()
+        self.assertEqual(code, 0, stderr)
+        directory, summary, _, predictions = self.artifacts()
+        self.assertEqual(summary["succeeded_samples"], 2)
+        self.assertEqual(summary["restarts"], 1)
+        self.assertEqual(summary["warmups_completed"], 2)
+        self.assertTrue(summary["closed"])
+        self.assertTrue(all(len(action) == 2 for p in predictions for action in p["chunk"]["actions"]))
+        resolved = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(resolved["model_input"], json.loads(stdout)["model_input"])
+        audit = [json.loads(line) for line in (directory / "mock/audit.jsonl").read_text().splitlines()]
+        calls = [e for e in audit if e["kind"] == "predict"]
+        self.assertEqual({(e["generation"], e["phase"]) for e in calls},
+                         {(1, "warmup"), (1, "inference"), (2, "warmup"), (2, "inference")})
+        for call in calls:
+            self.assertEqual(call["model_inputs"]["proprio"],
+                             {"shape": [2], "dtype": "float32", "values": [3.75, 1.25]})
+            self.assertEqual(call["model_inputs"]["raw_state"]["values"], [4.5])
+            self.assertEqual(call["model_inputs"]["camera"]["dtype"], "uint8")
+
+    @unittest.skipIf(np is None, "numpy is optional")
+    def test_model_input_config_errors_are_preflight_failures(self):
+        template = self.typed_inputs()
+        cases = [
+            template.replace("indices = [2, 0]", "indices = [3, 0]"),
+            template.replace("indices = [2, 0]", "indices = [true, 0]"),
+            template.replace("indices = [2, 0]", "indices = [0]"),
+            template.replace("indices = [2, 0]", 'indices = "2,0"'),
+            template.replace("indices = [2, 0]", "indices = [2, 0]\nunknown = 1"),
+            template.replace('dtype = "float32"', 'dtype = "int32"'),
+            template.replace("shape = [2, 3, 3]", "shape = [3, 2, 3]"),
+            template.replace('dtype = "uint8"', 'dtype = "float32"'),
+            template.replace('dtype = "float64"', 'dtype = "float32"'),
+            template.replace("shape = [1]", "shape = [2]"),
+            template.replace('key = "proprio"', 'key = "raw_state"'),
+            template + '\n[[model_input.arrays]]\nkey = "missing"\nkind = "state"\nshape = [1]\ndtype = "float32"\n',
+        ]
+        for text in cases:
+            with self.subTest(text=text), patch("robovla_runtime.integrations.offline_inference._factory") as factory:
+                code, _, stderr = self.invoke(text)
+                self.assertEqual(code, 2, stderr)
+                self.assertEqual(json.loads(stderr)["error"], "validation_failed")
+                factory.assert_not_called()
+                self.assertFalse(self.output.exists())
+
+    @unittest.skipIf(np is None, "numpy is optional")
+    def test_input_collision_and_overflow_fail_before_process_creation(self):
+        template = self.typed_inputs()
+        original = self.manifest.read_text(encoding="utf-8")
+        for collision in (True, False):
+            raw = json.loads(original)
+            # An invalid later sample must also fail the complete preflight.
+            if collision:
+                raw["samples"][1]["payload"]["proprio"] = [0.0, 0.0]
+            else:
+                raw["samples"][1]["state"][0] = 1e300
+            self.manifest.write_text(json.dumps(raw), encoding="utf-8")
+            with patch("robovla_runtime.integrations.offline_inference._factory") as factory:
+                code, _, stderr = self.invoke(template)
+                self.assertEqual(code, 2, stderr)
+                self.assertIn("frame-1", json.loads(stderr)["message"])
+                factory.assert_not_called()
+                self.assertFalse(self.output.exists())
+
     def test_independent_dimensions_survive_warmup_and_process_restart(self):
         raw = json.loads(self.manifest.read_text(encoding="utf-8"))
         for sample in raw["samples"]:

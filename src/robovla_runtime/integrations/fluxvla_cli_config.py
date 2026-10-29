@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, fields as dataclass_fields
 from pathlib import Path
 
 from robovla_runtime.backends import ProcessBackendConfig
+from robovla_runtime.backends.fluxvla_inputs import FluxVLAModelInputSpec, PayloadArraySpec, StatePayloadMapping
 from robovla_runtime.core import ActionSpec, ObservationSpec
 from .fluxvla_process import FluxVLALiberoFactory
 from .offline_observations import fields, integer, load_observations, nonempty, number, sha256
@@ -27,6 +28,7 @@ class OfflineInferenceConfig:
     max_attempts_per_sample: int = 2
     poll_interval_s: float = 0.005
     close_timeout_s: float = 2.0
+    input_spec: FluxVLAModelInputSpec | None = None
 
     @property
     def required_payload_keys(self):
@@ -37,6 +39,7 @@ class OfflineInferenceConfig:
             "version": 1, "source": self.source, "action": asdict(self.action_spec), "model": self.model,
             "observations": {"manifest": self.manifest, **asdict(self.observation_spec)},
             "process": asdict(self.process),
+            "model_input": asdict(self.input_spec) if self.input_spec else None,
             "inference": {name: getattr(self, name) for name in (
                 "repeats", "max_attempts_per_sample", "poll_interval_s", "close_timeout_s",
             )},
@@ -47,7 +50,7 @@ def load_inference_config(path: str | Path):
     path = Path(path).resolve()
     with path.open("rb") as stream:
         raw = tomllib.load(stream)
-    fields(raw, {"version", "action", "model", "observations", "process", "inference"},
+    fields(raw, {"version", "action", "model", "observations", "process", "inference", "model_input"},
            {"version", "action", "model", "observations"}, "config")
     if type(raw["version"]) is not int or raw["version"] != 1:
         raise ValueError("config version must be 1")
@@ -138,8 +141,30 @@ def load_inference_config(path: str | Path):
         raise ValueError("duplicate required payload key")
     manifest = (path.parent / nonempty(observations["manifest"], "observations.manifest")).resolve()
     loaded = load_observations(manifest, state_dimension=observations.get("state_dimension"), required_payload_keys=required)
+    input_spec = None
+    if "model_input" in raw:
+        inputs = raw["model_input"]
+        fields(inputs, {"arrays", "state_mapping"}, {"arrays"}, "model_input")
+        entries = {}
+        for name, cls in (("arrays", PayloadArraySpec), ("state_mapping", StatePayloadMapping)):
+            values = inputs.get(name, [])
+            if not isinstance(values, list):
+                raise ValueError(f"model_input.{name} must be an array of tables")
+            entries[name] = []
+            keys = {f.name for f in dataclass_fields(cls)}
+            for value in values:
+                fields(value, keys, keys, f"model_input.{name}")
+                entries[name].append(cls(**value))
+        input_spec = FluxVLAModelInputSpec(**entries)
+        input_spec.validate_state_dimension(loaded.observation_spec.state_dimension)
+        for index, sample in enumerate(loaded.samples):
+            try:
+                input_spec.prepare(loaded(index))
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"sample {sample.sample_id}: {error}") from error
     if model["kind"] == "mock" and any("camera" not in sample.payload for sample in loaded.samples):
         raise ValueError("mock model observations must contain camera payload")
-    config = OfflineInferenceConfig(str(path), spec, model, str(manifest), loaded.observation_spec, process_config, **inference)
+    config = OfflineInferenceConfig(str(path), spec, model, str(manifest), loaded.observation_spec, process_config,
+                                   input_spec=input_spec, **inference)
     provenance = [{"path": str(path), "sha256": sha256(path)}, *loaded.provenance]
     return config, loaded, provenance
