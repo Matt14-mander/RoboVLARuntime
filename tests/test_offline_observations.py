@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
 import pickle
 import tempfile
@@ -85,6 +86,24 @@ class OfflineObservationTests(unittest.TestCase):
         changed = loaded(0)
         changed.payload["camera"][0, 0, 0] = 99
         self.assertEqual(loaded(0).payload["camera"][0, 0, 0], 0)
+
+    @unittest.skipIf(np is None, "optional numpy is not installed")
+    def test_empty_and_truncated_npy_raise_contextual_validation_error(self):
+        stream = io.BytesIO()
+        np.save(stream, np.zeros((2, 2, 3), dtype=np.uint8))
+        complete = stream.getvalue()
+        self.raw["samples"][0]["payload"] = {}
+        self.raw["samples"][0]["arrays"] = {
+            "camera": {"path": "camera.npy", "shape": [2, 2, 3], "dtype": "uint8"},
+        }
+        for name, data in (("empty", b""), ("truncated_header", complete[:12]),
+                           ("truncated_data", complete[:-1])):
+            with self.subTest(case=name):
+                (self.root / "camera.npy").write_bytes(data)
+                with self.assertRaisesRegex(ValueError, "invalid array camera in") as caught:
+                    self.load()
+                self.assertIn(str(self.root / "camera.npy"), str(caught.exception))
+                self.assertIsNotNone(caught.exception.__cause__)
 
     @unittest.skipIf(np is None, "optional numpy is not installed")
     def test_arrays_reject_objects_nonfinite_wrong_shape_dtype_and_missing_archive_key(self):
