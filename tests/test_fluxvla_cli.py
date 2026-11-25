@@ -341,7 +341,8 @@ indices = [2, 0]
                     error = json.loads(result.stderr)
                     self.assertEqual(error["error"], "validation_failed")
                     self.assertIn("invalid array camera in", error["message"])
-                    self.assertIn(str(self.root / "camera.npy"), error["message"])
+                    # Windows TEMP can use an 8.3 alias; the loader reports the resolved path.
+                    self.assertIn(str((self.root / "camera.npy").resolve()), error["message"])
                     self.assertFalse(self.output.exists())
 
     @unittest.skipIf(np is None, "optional numpy is not installed")

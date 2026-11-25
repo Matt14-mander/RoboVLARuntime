@@ -121,7 +121,8 @@ class OfflineObservationTests(unittest.TestCase):
                 (self.root / "camera.npy").write_bytes(data)
                 with self.assertRaisesRegex(ValueError, "invalid array camera in") as caught:
                     self.load()
-                self.assertIn(str(self.root / "camera.npy"), str(caught.exception))
+                # Match the loader's canonical path, including Windows 8.3 expansion.
+                self.assertIn(str((self.root / "camera.npy").resolve()), str(caught.exception))
                 self.assertIsNotNone(caught.exception.__cause__)
 
     @unittest.skipIf(np is None, "optional numpy is not installed")
