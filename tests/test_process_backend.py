@@ -5,6 +5,10 @@ import time
 import tempfile
 import unittest
 from pathlib import Path
+from threading import Event, Thread, current_thread
+from unittest.mock import patch
+
+from robovla_runtime.backends import process as process_module
 
 from benchmarks.process_fixtures import AttemptCounter, RecoveryMockFactory
 from robovla_runtime.backends import ProcessBackendConfig, ProcessPolicyBackend, PredictionFailure
@@ -36,7 +40,101 @@ class ProcessBackendTests(unittest.TestCase):
             if results:
                 return results[0]
             time.sleep(0.005)
-        self.fail("no process result before test deadline")
+        self.fail(f"no process result before test deadline; diagnostics={backend.poll_diagnostics()}; "
+                  f"supervisor_alive={backend._supervisor.is_alive()}; "
+                  f"ipc_alive={backend._io is not None and backend._io.is_alive()}")
+
+    def test_ipc_thread_owns_connection_close(self):
+        original = process_module._transport
+        owners = []
+        class Connection:
+            def __init__(self, connection):
+                self.connection = connection
+            def send(self, value):
+                return self.connection.send(value)
+            def recv(self):
+                return self.connection.recv()
+            def close(self):
+                owners.append(current_thread().name)
+                self.connection.close()
+        def transport(connection, outgoing, incoming):
+            return original(Connection(connection), outgoing, incoming)
+        with patch.object(process_module, "_transport", transport):
+            backend, _ = self.backend(("request_hang",), execution_timeout_s=5.0)
+            backend.submit(self.observation(), 0.0)
+            self.wait_event(backend, "process_request_started")
+            self.assertTrue(backend.close(2.0))
+        self.assertEqual(owners, ["robovla-process-ipc"])
+
+    def test_slow_ipc_exit_does_not_lose_request_after_episode_reset(self):
+        original = process_module._transport
+        exiting, release = Event(), Event()
+        calls = []
+        def transport(connection, outgoing, incoming):
+            calls.append(1)
+            first = len(calls) == 1
+            try:
+                original(connection, outgoing, incoming)
+            finally:
+                if first:
+                    exiting.set()
+                    release.wait(5.0)
+        def delayed_release():
+            if exiting.wait(5.0):
+                # Model OS scheduling lag beyond the process terminate grace.
+                release.wait(0.5)
+                release.set()
+        helper = Thread(target=delayed_release, daemon=True)
+        helper.start()
+        self.addCleanup(lambda: helper.join(2.0))
+        self.addCleanup(release.set)
+        with patch.object(process_module, "_transport", transport):
+            backend, attempts = self.backend(("request_hang",), execution_timeout_s=5.0,
+                                             terminate_grace_s=0.1)
+            backend.submit(self.observation(), 0.0)
+            self.wait_event(backend, "process_request_started")
+            backend.cancel_episode("ep")
+            backend.reset("ep")
+            queued = backend.submit(self.observation(1), 0.02)
+            result = self.wait_result(backend)
+            self.assertNotIsInstance(result, PredictionFailure, result)
+            self.assertEqual(result.request_id, queued.request_id)
+            self.assertEqual(result.chunk.actions[0], (1.0,))
+            self.assertEqual(attempts.value, 2)
+            self.assertEqual(backend.poll(), ())
+
+    def test_stuck_transport_reports_queued_failure_and_cannot_be_reset(self):
+        original = process_module._transport
+        exiting, release = Event(), Event()
+        def transport(connection, outgoing, incoming):
+            try:
+                original(connection, outgoing, incoming)
+            finally:
+                exiting.set()
+                release.wait(5.0)
+        with patch.object(process_module, "_transport", transport):
+            backend, attempts = self.backend(("request_hang",), execution_timeout_s=5.0,
+                                             transport_shutdown_timeout_s=0.05)
+            self.addCleanup(release.set)
+            backend.submit(self.observation(), 0.0)
+            self.wait_event(backend, "process_request_started")
+            backend.reset("ep")
+            queued = backend.submit(self.observation(1), 0.02)
+            self.assertTrue(exiting.wait(2.0))
+            failure = self.wait_result(backend)
+            self.assertIsInstance(failure, PredictionFailure)
+            self.assertEqual(failure.request_id, queued.request_id)
+            self.assertEqual(failure.error_type, "ProcessUnavailable")
+            self.assertIn("cleanup", failure.message)
+            self.assertEqual(attempts.value, 1, "must not start a model while transport is still alive")
+            with self.assertRaisesRegex(RuntimeError, "supervisor stopped"):
+                backend.reset("ep")
+            next_request = backend.submit(self.observation(2), 0.04)
+            self.assertEqual(self.wait_result(backend).request_id, next_request.request_id)
+            self.assertFalse(backend.close(0.0))
+            release.set()
+            self.assertTrue(backend.close(2.0))
+            self.assertEqual(backend.poll(), ())
 
     def wait_event(self, backend, kind, timeout=5.0):
         deadline = time.perf_counter() + timeout
@@ -214,7 +312,9 @@ class ProcessBackendTests(unittest.TestCase):
 
     def test_invalid_process_settings(self):
         for settings in ({"execution_timeout_s": 0}, {"startup_timeout_s": float("inf")},
-                         {"terminate_grace_s": -1}, {"max_restarts": -1}, {"max_restarts": 1.5}):
+                         {"terminate_grace_s": -1}, {"transport_shutdown_timeout_s": 0},
+                         {"transport_shutdown_timeout_s": float("nan")},
+                         {"max_restarts": -1}, {"max_restarts": 1.5}):
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 ProcessBackendConfig(**settings)
         with self.assertRaises(ValueError):

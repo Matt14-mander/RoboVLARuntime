@@ -1,0 +1,77 @@
+name: Runtime regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.12']
+    env:
+      PYTHONPATH: src
+      PYTHONUNBUFFERED: '1'
+      PYTHONFAULTHANDLER: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install offline dependencies
+        run: python -m pip install -e ".[offline]"
+      - name: Full tests and deterministic baseline comparisons
+        run: python -m unittest discover -s tests -v
+      - name: Repeated process lifecycle regression (no retries)
+        run: python -m benchmarks.run_process_stress --iterations 20 --output-dir runs/ci-process-stress
+      - name: Worker smoke
+        run: python -m benchmarks.run_worker_smoke --output-dir runs/ci-worker --summary-prefix runs/ci-worker-report
+      - name: Process recovery smoke
+        run: python -m benchmarks.run_process_recovery --output-dir runs/ci-recovery --summary-prefix runs/ci-recovery-report
+      - name: FluxVLA process smoke
+        run: python -m benchmarks.run_fluxvla_process --output-dir runs/ci-fluxvla-process --summary-prefix runs/ci-fluxvla-process-report
+      - name: FluxVLA CLI smoke
+        run: python -m benchmarks.run_fluxvla_cli --output-dir runs/ci-fluxvla-cli --summary-prefix runs/ci-fluxvla-cli-report
+      - name: FluxVLA input contract smoke
+        run: python -m benchmarks.run_fluxvla_inputs --output-dir runs/ci-inputs
+      - name: Keep diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: regression-${{ matrix.os }}-py${{ matrix.python }}
+          path: runs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  core-without-numpy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Assert optional dependency is absent
+        run: python -c "import importlib.util; assert importlib.util.find_spec('numpy') is None"
+      - name: Standard-library-only tests
+        run: python -m unittest discover -s tests -v

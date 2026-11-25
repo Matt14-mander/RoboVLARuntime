@@ -57,11 +57,13 @@ class RuntimeConfig:
     process_execution_timeout_s: float = 1.0
     process_terminate_grace_s: float = 0.1
     process_max_restarts: int = 3
+    process_transport_shutdown_timeout_s: float = 1.0
 
     def process_config(self) -> ProcessBackendConfig:
         return ProcessBackendConfig(
             self.process_startup_timeout_s, self.process_execution_timeout_s,
             self.process_terminate_grace_s, self.process_max_restarts,
+            self.process_transport_shutdown_timeout_s,
         )
 
     def adaptive_config(self) -> AdaptivePrefetchConfig:

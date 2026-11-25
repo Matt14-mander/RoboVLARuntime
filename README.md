@@ -33,6 +33,12 @@ $env:PYTHONPATH = "src"
 python -m unittest discover -s tests -v
 ```
 
+PRs and main pushes run automatic regression on Windows/Linux with Python
+3.11/3.12, plus a dependency-free core job. Process lifecycle checks repeat
+without retries; simulated worker and FluxVLA benchmarks retain diagnostics.
+Run `python -m benchmarks.run_process_stress --iterations 20` locally to exercise
+cancellation, restart and bounded IPC cleanup repeatedly. See [recovery and CI](docs/PROCESS_BACKEND.md#自动回归).
+
 Run the phase-one latency matrix with:
 
 ```powershell
