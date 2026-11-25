@@ -117,3 +117,10 @@ Observation state dimensions are independent of action dimensions. Configure
 sample and validate all remaining samples against it. The
 `configs/fluxvla_offline_state3_action2.toml` example validates three state
 components and two action components through warmup, inference, and restart.
+
+Optional `model_input` contracts explicitly map selected state components into
+model payload fields and validate camera/raw-state array shapes, dtypes, and
+finite values before dataset transforms. The same contract runs in CLI preflight,
+warmup, inference, and after process restart. See the [input contract guide](docs/FLUXVLA_CLI.md#显式模型输入契约).
+With NumPy installed, `python -m benchmarks.run_fluxvla_inputs` generates typed
+synthetic samples and checks mapping, restart recovery, and invalid-input rejection.

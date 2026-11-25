@@ -15,6 +15,7 @@ from typing import Any, ContextManager, Literal, Protocol
 from robovla_runtime.core.types import ActionChunk, ActionSpec, Observation
 
 from .base import PendingPrediction
+from .fluxvla_inputs import FluxVLAModelInputSpec
 
 Preprocessor = Callable[[Observation], Mapping[str, Any]]
 ActionDecoder = Callable[[Any], Sequence[Sequence[float]]]
@@ -139,6 +140,8 @@ class FluxVLALiberoPreprocessor:
         task_description: str,
         unnorm_key: str,
         predict_options: Mapping[str, Any] | None = None,
+        *,
+        input_spec: FluxVLAModelInputSpec | None = None,
     ) -> None:
         if not task_description or not unnorm_key:
             raise ValueError("task_description and unnorm_key are required")
@@ -146,6 +149,9 @@ class FluxVLALiberoPreprocessor:
         self.task_description = task_description
         self.unnorm_key = unnorm_key
         self.predict_options = dict(predict_options or {})
+        if input_spec is not None and not isinstance(input_spec, FluxVLAModelInputSpec):
+            raise TypeError("input_spec must be a FluxVLAModelInputSpec")
+        self.input_spec = input_spec
         self._last_episode_id: str | None = None
         self._last_generation: int | None = None
 
@@ -156,7 +162,7 @@ class FluxVLALiberoPreprocessor:
     def __call__(self, observation: Observation) -> Mapping[str, Any]:
         if not isinstance(observation.payload, Mapping):
             raise TypeError("LIBERO preprocessing requires a mapping payload")
-        raw_observation = dict(observation.payload)
+        raw_observation = self.input_spec.prepare(observation) if self.input_spec else dict(observation.payload)
         is_new_episode = (
             observation.episode_id != self._last_episode_id
             or observation.episode_generation != self._last_generation
@@ -250,6 +256,7 @@ class FluxVLABackend:
         timing_mode: Literal["diagnostic", "throughput"] = "diagnostic",
         gpu_timer: GpuTimer | None = None,
         reset_model: Callable[[], None] | None = None,
+        input_spec: FluxVLAModelInputSpec | None = None,
     ) -> "FluxVLABackend":
         """Create an adapter from an initialized FluxVLA LiberoEvalRunner."""
         predict_options = {}
@@ -262,6 +269,7 @@ class FluxVLABackend:
             task_description,
             runner.task_suite_name,
             predict_options,
+            input_spec=input_spec,
         )
         decoder = make_libero_action_decoder(
             runner.denormalize_action,

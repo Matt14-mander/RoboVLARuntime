@@ -48,10 +48,10 @@ def _factory(config, observations, directory):
         overrides = {key: model[key] for key in (
             "task_description", "task_suite_name", "num_inference_steps", "inference_seed", "timing_mode",
         ) if key in model}
-        recipe = replace(mock.recipe, action_spec=config.action_spec, **overrides)
+        recipe = replace(mock.recipe, action_spec=config.action_spec, input_spec=config.input_spec, **overrides)
         builder = replace(mock, recipe=recipe, offline_mode=True)
     else:
-        builder = FluxVLALiberoFactory(action_spec=config.action_spec, **{
+        builder = FluxVLALiberoFactory(action_spec=config.action_spec, input_spec=config.input_spec, **{
             k: v for k, v in model.items() if k not in {"kind", "warmup_steps", "model_is_stateless"}
         })
     return _LoggedFactory(

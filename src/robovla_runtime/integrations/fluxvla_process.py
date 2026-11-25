@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from robovla_runtime.backends.fluxvla import FluxVLABackend
+from robovla_runtime.backends.fluxvla_inputs import FluxVLAModelInputSpec
 from robovla_runtime.backends.process import ProcessBackendConfig, ProcessPolicyBackend
 from robovla_runtime.core.types import ActionSpec, Observation, ObservationSpec
 
@@ -26,8 +27,11 @@ class FluxVLALiberoFactory:
     inference_seed: int | None = None
     timing_mode: str = "throughput"
     reset_model_method: str | None = None
+    input_spec: FluxVLAModelInputSpec | None = None
 
     def __post_init__(self) -> None:
+        if self.input_spec is not None and not isinstance(self.input_spec, FluxVLAModelInputSpec):
+            raise TypeError("input_spec must be a FluxVLAModelInputSpec")
         if not self.task_description:
             raise ValueError("task_description is required")
         if self.timing_mode not in {"diagnostic", "throughput"}:
@@ -65,6 +69,7 @@ class FluxVLALiberoFactory:
                 runner, self.action_spec, self.task_description,
                 synchronize=torch.cuda.synchronize, timing_mode=self.timing_mode,
                 reset_model=reset_model,
+                input_spec=self.input_spec,
             )
         except Exception:
             cleanup = getattr(runner, "cleanup", None)
