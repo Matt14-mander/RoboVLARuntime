@@ -22,6 +22,7 @@ python -m benchmarks.run_process_recovery --output-dir runs/process_recovery_rer
 | `process_startup_timeout_s` | 10.0 | 子进程启动后，等待导入、工厂构建与 ready 握手的上限 |
 | `process_execution_timeout_s` | 1.0 | 派发后 IPC、模型 reset、推理与返回结果的 watchdog 上限 |
 | `process_terminate_grace_s` | 0.1 | terminate 后等待回收的上限；必要时 kill 并再等待一次 |
+| `process_transport_shutdown_timeout_s` | 1.0 | 旧进程回收后等待 IPC 线程退出的独立上限 |
 | `process_max_restarts` | 3 | 连续故障允许的自动重启次数；初始启动不占用次数 |
 | `request_timeout_s` | 0.5 | 保留上一轮语义：提交到控制循环收集结果的 deadline |
 | `worker_close_timeout_s` | 0.1 | 控制线程在退出时等待整个监督线程结束的上限 |
@@ -49,6 +50,10 @@ python -m benchmarks.run_process_recovery --output-dir runs/process_recovery_rer
 cancel_episode 撤销等待请求和结果，并终止该 episode 的在途推理；close 进一步关闭整个监督器。close 返回 true 表示子进程和 IPC 线程已经回收。若调用方给出的等待太短，会返回 false，监督线程仍继续清理；运行时记录 `worker_shutdown_timeout`，调用方可再次 close 等待清理完成。
 
 如果 terminate/kill 后仍不能确认旧进程退出，后端停止接收实际推理，不会启动第二个模型进程；记录 `process_termination_failed`。监督线程不可恢复地退出时，应建立新的 backend，不能用 reset 假装完成恢复。
+
+父端管道由 IPC 线程在 finally 中关闭，监督线程不会在另一个线程仍进行读写时关闭 Windows 管道。进程回收后通过 EOF 或队列结束标记唤醒 IPC，再等待独立的 transport_shutdown_timeout_s；该值在 ProcessBackendConfig 和离线 CLI 的 `[process]` 中不带 process_ 前缀。它不改变推理 watchdog 或请求 deadline。
+
+如果 IPC 确实无法在期限内退出，后端记录 process_transport_stuck 并停止启动模型；已排队请求和后续提交返回 ProcessUnavailable，reset 明确拒绝已停止的监督器，即使最后清理仍在进行。调用方应创建新 backend。close 的等待仍受调用参数约束，返回 false 后可再次等待；不会通过提高测试的结果等待期限来掩盖队列请求丢失。
 
 ## 接入真实模型的接口
 
@@ -84,3 +89,17 @@ if __name__ == "__main__":
 测试覆盖真实 spawn、历史状态重置、推理/reset/启动卡死、异常退出、失败后的恢复、序列化失败、排队替换和过期、episode 取消、重启预算及关闭回收。恢复演示包含七组场景，每组 200 个 tick，检查超时请求未被执行、所有子进程被回收、单次故障后恢复动作、连续故障后停止重启。状态计数按新进程中的调用次数校验，允许先前完成的动作因收集过晚而被丢弃。
 
 本轮验证的是 OS 进程生命周期与合成模型状态。真实 FluxVLA / CUDA 模型加载、驱动卡死、设备资源回收和真实机器人安全停止尚未验证；进程隔离也不构成硬实时保证。
+
+## 自动回归
+
+`.github/workflows/regression.yml` 在 PR、main 推送及手动触发时运行。Windows/Linux × Python 3.11/3.12 执行含 NumPy 的全量测试、20 轮进程生命周期压力回归，以及 worker、进程恢复、FluxVLA 进程/CLI/输入契约模拟基准；另有无 NumPy 的核心测试。全量测试包含 8 组 mock 与 12 组自适应历史结果对照。失败不会自动重试变绿，运行产物保存 14 天。
+
+本地可重复运行（输出目录须不存在）：
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m unittest discover -s tests -v
+python -m benchmarks.run_process_stress --iterations 20 --output-dir runs/process_stress
+```
+
+每轮执行取消、过期、重启预算、关闭、管道关闭归属、延迟 IPC 退出和 IPC 回收失败共 7 个场景。tests.log 与 report.json 保留结果；等待结果超时会附带进程诊断及监督器/IPC 线程存活状态。

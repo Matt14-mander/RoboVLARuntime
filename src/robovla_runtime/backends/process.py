@@ -23,9 +23,11 @@ class ProcessBackendConfig:
     execution_timeout_s: float = 1.0
     terminate_grace_s: float = 0.1
     max_restarts: int = 3
+    transport_shutdown_timeout_s: float = 1.0
 
     def __post_init__(self) -> None:
-        for value in (self.startup_timeout_s, self.execution_timeout_s, self.terminate_grace_s):
+        for value in (self.startup_timeout_s, self.execution_timeout_s, self.terminate_grace_s,
+                      self.transport_shutdown_timeout_s):
             if not math.isfinite(value) or value <= 0:
                 raise ValueError("process timeouts must be finite and positive")
         if isinstance(self.max_restarts, bool) or not isinstance(self.max_restarts, int) or self.max_restarts < 0:
@@ -105,6 +107,10 @@ def _transport(connection, outgoing: queue.Queue, incoming: queue.Queue) -> None
             incoming.put(connection.recv())
     except Exception as error:
         incoming.put(("transport_error", (type(error).__name__, str(error))))
+    finally:
+        # Never close a Windows pipe from the supervisor while this thread may
+        # be using an overlapped read/write. Child termination wakes blocked IO.
+        connection.close()
 
 
 class _Fault(Exception):
@@ -144,6 +150,7 @@ class ProcessPolicyBackend:
         self._epoch = 0
         self._next_request_id = 0
         self._closed = False
+        self._stopped = False
         self._exhausted = False
         self._failures = 0
         self._generation = 0
@@ -173,7 +180,7 @@ class ProcessPolicyBackend:
         with self._condition:
             if self._closed:
                 raise RuntimeError("process backend is closed")
-            if not self._supervisor.is_alive():
+            if self._stopped or not self._supervisor.is_alive():
                 raise RuntimeError("process supervisor stopped; create a new backend")
             self._epoch += 1
             self._queued = None
@@ -200,10 +207,11 @@ class ProcessPolicyBackend:
             request_id = self._next_request_id
             self._next_request_id += 1
             replaced = self._queued.request_id if self._queued is not None else None
-            if self._exhausted:
+            if self._exhausted or self._stopped:
                 self._results.append(PredictionFailure(
                     request_id, requested_at, observation.episode_id,
-                    "ProcessUnavailable", "restart budget exhausted; explicit reset required",
+                    "ProcessUnavailable", ("process supervisor stopped; create a new backend" if self._stopped
+                                           else "restart budget exhausted; explicit reset required"),
                 ))
             else:
                 enqueued_at = time.perf_counter()
@@ -361,17 +369,20 @@ class ProcessPolicyBackend:
             self._emit("process_worker_terminated", pid=pid, reason=reason, exitcode=process.exitcode)
             process.close()
             self._process = None
-        if self._connection is not None:
-            self._connection.close()
-            self._connection = None
         if self._outgoing is not None:
             self._outgoing.put(None)
         if self._io is not None:
-            self._io.join(self.config.terminate_grace_s)
+            # OS process termination and Python transport scheduling have
+            # independent budgets. Do not misclassify a delayed EOF as a hang.
+            self._io.join(self.config.transport_shutdown_timeout_s)
             if self._io.is_alive():
                 self._emit("process_transport_stuck", reason=reason)
                 return False
             self._io = None
+        if self._connection is not None:
+            # Also covers startup failure before a transport thread was created.
+            self._connection.close()
+            self._connection = None
         return True
 
     def _record_fault(self, kind: str, message: str, request: _Request | None, epoch: int) -> None:
@@ -494,7 +505,16 @@ class ProcessPolicyBackend:
                             ))
                 self._queued = None
         finally:
-            self._stop("closed")
             with self._condition:
                 # An unexpected supervisor/termination failure fails closed.
+                self._stopped = True
                 self._exhausted = True
+                if not self._closed and self._queued is not None:
+                    waiting = self._queued
+                    if waiting.epoch == self._epoch:
+                        self._results.append(PredictionFailure(
+                            waiting.request_id, waiting.requested_at, waiting.observation.episode_id,
+                            "ProcessUnavailable", "process supervisor stopped during cleanup; create a new backend",
+                        ))
+                self._queued = None
+            self._stop("closed")
